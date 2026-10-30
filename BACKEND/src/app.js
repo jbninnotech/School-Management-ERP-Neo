@@ -6,6 +6,7 @@ import dashboardRoutes from './routes/dashboardRoutes.js';
 import examRoutes from './routes/examRoutes.js';
 import questionRoutes from './routes/questionRoutes.js';
 import academicRoutes from './routes/academicRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
 
 const app = express();
 
@@ -37,6 +38,9 @@ app.use('/api/v1/questions', questionRoutes);
 
 app.use('/api/academic', academicRoutes);
 app.use('/api/v1/academic', academicRoutes);
+
+app.use('/api/notifications', notificationRoutes);
+app.use('/api/v1/notifications', notificationRoutes);
 
 // 404 handler
 app.use((req, res, next) => {

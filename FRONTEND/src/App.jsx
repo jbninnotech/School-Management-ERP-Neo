@@ -14,9 +14,11 @@ import QuestionPaperBuilder from './pages/exams/QuestionPaperBuilder.jsx';
 import QuestionBank from './pages/exams/QuestionBank.jsx';
 import ExamApproval from './pages/exams/ExamApproval.jsx';
 import StudentExamInterface from './pages/exams/StudentExamInterface.jsx';
+import LiveExamMonitor from './pages/exams/LiveExamMonitor.jsx';
 import TeacherEvaluation from './pages/exams/TeacherEvaluation.jsx';
 import ExamResultsDashboard from './pages/exams/ExamResultsDashboard.jsx';
 import StudentResultView from './pages/exams/StudentResultView.jsx';
+import NotificationPage from './pages/notifications/NotificationPage.jsx';
 
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 
@@ -33,6 +35,14 @@ export default function App() {
           element={
             <ProtectedRoute>
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/notifications"
+          element={
+            <ProtectedRoute>
+              <NotificationPage />
             </ProtectedRoute>
           }
         />
@@ -127,6 +137,16 @@ export default function App() {
           element={
             <ProtectedRoute allowedRoles={['superadmin', 'admin']}>
               <ExamApproval />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Live Exam Monitor Screen */}
+        <Route
+          path="/exams/:id/monitor"
+          element={
+            <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
+              <LiveExamMonitor />
             </ProtectedRoute>
           }
         />

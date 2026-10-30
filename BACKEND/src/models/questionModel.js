@@ -50,12 +50,13 @@ const questionSchema = new mongoose.Schema(
         'diagram_based',
         'case_study',
         'assertion_reason',
+        'oral_observational',
       ],
       index: true,
     },
     difficulty: {
       type: String,
-      enum: ['easy', 'medium', 'hard'],
+      enum: ['easy', 'medium', 'hard', 'advanced', 'olympiad'],
       default: 'medium',
       index: true,
     },
@@ -70,6 +71,38 @@ const questionSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    partialMarkingRule: {
+      type: String,
+      enum: ['none', 'proportional', 'custom'],
+      default: 'none',
+    },
+    version: {
+      type: Number,
+      default: 1,
+    },
+    rubric: {
+      type: String,
+      default: '',
+    },
+    isDepartmentShared: {
+      type: Boolean,
+      default: false,
+    },
+    usageCount: {
+      type: Number,
+      default: 0,
+    },
+    lastUsedAt: {
+      type: Date,
+    },
+    reviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    reviewComments: {
+      type: String,
+      default: '',
+    },
     questionText: {
       type: String,
       required: [true, 'Question text is required'],
@@ -80,15 +113,15 @@ const questionSchema = new mongoose.Schema(
     },
     passageText: {
       type: String,
-      default: '', // Used for passage_based and case_study
+      default: '',
     },
     imageUrl: {
       type: String,
-      default: '', // Used for image_based, diagram_based, or general visual aids
+      default: '',
     },
     options: [
       {
-        id: { type: String, required: true }, // e.g. "opt_1", "opt_2"
+        id: { type: String, required: true },
         text: { type: String, required: true },
         imageUrl: { type: String, default: '' },
       },
@@ -100,20 +133,13 @@ const questionSchema = new mongoose.Schema(
         right: { type: String, required: true },
       },
     ],
-    // Correct answer can hold:
-    // - string (option id for single_mcq, assertion_reason)
-    // - array of strings (for multiple_select or accepted fill_blanks)
-    // - boolean (for true_false)
-    // - number (for numerical)
-    // - array of { left, right } (for match_following)
-    // - descriptive guidance / rubric (for short_answer, long_answer, case_study)
     correctAnswer: {
       type: mongoose.Schema.Types.Mixed,
       required: true,
     },
     numericalTolerance: {
       type: Number,
-      default: 0, // e.g. 0.05
+      default: 0,
     },
     explanation: {
       type: String,
@@ -131,7 +157,7 @@ const questionSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['draft', 'approved', 'archived'],
+      enum: ['draft', 'in_review', 'approved', 'archived'],
       default: 'approved',
       index: true,
     },
@@ -143,7 +169,6 @@ const questionSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Search indexes
 questionSchema.index({
   questionText: 'text',
   chapter: 'text',

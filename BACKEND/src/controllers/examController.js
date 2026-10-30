@@ -3,6 +3,11 @@ import Examination from '../models/examinationModel.js';
 import ExaminationAttempt from '../models/examinationAttemptModel.js';
 import ExaminationAuditLog from '../models/examinationAuditLogModel.js';
 import User from '../models/userModel.js';
+import {
+  notifyStudentsExamScheduled,
+  notifyStudentsExamCancelled,
+  notifyStudentsResultsPublished,
+} from '../services/notificationService.js';
 
 // Helper: Log audit event
 const logAuditEvent = async (examId, userId, userRole, action, details = {}, ip = '') => {
@@ -18,6 +23,15 @@ const logAuditEvent = async (examId, userId, userRole, action, details = {}, ip 
   } catch (err) {
     console.error('Audit log error:', err.message);
   }
+};
+
+// Helper: Safely resolve question identifier
+const getQuestionId = (q, fallback = '') => {
+  if (!q) return fallback;
+  if (q.questionId) return q.questionId.toString();
+  if (q._id) return q._id.toString();
+  if (q.id) return q.id.toString();
+  return fallback;
 };
 
 // Helper: Evaluate single question automatically
@@ -91,7 +105,6 @@ const autoEvaluateQuestion = (q, studentAnswer, negativeMarkingEnabled, defaultN
     }
 
     case 'match_following': {
-      // Expecting array of { left, right }
       const studentPairs = Array.isArray(studentAnswer) ? studentAnswer : [];
       const correctPairs = Array.isArray(q.correctAnswer) ? q.correctAnswer : [];
       let matchCount = 0;
@@ -107,7 +120,6 @@ const autoEvaluateQuestion = (q, studentAnswer, negativeMarkingEnabled, defaultN
       };
     }
 
-    // Descriptive / Subjective Types
     case 'short_answer':
     case 'long_answer':
     case 'case_study':
@@ -125,7 +137,7 @@ const autoEvaluateQuestion = (q, studentAnswer, negativeMarkingEnabled, defaultN
 };
 
 // -------------------------------------------------------------
-// 1. CREATE EXAMINATION (Step 1-4 Wizard)
+// 1. CREATE EXAMINATION
 // -------------------------------------------------------------
 export const createExam = async (req, res, next) => {
   try {
@@ -175,7 +187,6 @@ export const createExam = async (req, res, next) => {
       });
     }
 
-    // Default 1 section if not provided
     const initialSections = examSections && examSections.length > 0
       ? examSections
       : [
@@ -244,24 +255,27 @@ export const createExam = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 2. GET EXAMS (Scoped by Role)
+// 2. GET EXAMS
 // -------------------------------------------------------------
 export const getExams = async (req, res, next) => {
   try {
     const { status, classGrade, subject, search } = req.query;
     const query = {};
 
-    // Role-based filtering
     if (req.user.role === 'student') {
       const studentClass = req.user.studentProfile?.classGrade;
       const studentSection = req.user.studentProfile?.section;
 
       query.classGrade = studentClass;
-      query.sections = studentSection;
-      // Students only see approved, scheduled, in_progress, completed, or results_published
-      query.status = { $in: ['scheduled', 'in_progress', 'completed', 'results_published'] };
+      if (studentSection) {
+        query.$or = [
+          { sections: studentSection },
+          { sections: { $size: 0 } },
+          { sections: { $exists: false } },
+        ];
+      }
+      query.status = { $in: ['scheduled', 'published', 'in_progress', 'completed', 'results_published', 'cancelled'] };
     } else if (req.user.role === 'teacher') {
-      // Teachers see exams they created or exams for their assigned classes
       const assignedClasses = req.user.teacherProfile?.assignedClasses || [];
       if (assignedClasses.length > 0) {
         query.$or = [
@@ -272,7 +286,6 @@ export const getExams = async (req, res, next) => {
         query.createdBy = req.user._id;
       }
     }
-    // SuperAdmin and Admin see all exams
 
     if (status) query.status = status;
     if (classGrade) query.classGrade = classGrade;
@@ -290,10 +303,28 @@ export const getExams = async (req, res, next) => {
       .populate('reviewedBy', 'name email role')
       .sort({ createdAt: -1 });
 
+    let sanitizedExams = exams;
+    if (req.user.role === 'student') {
+      sanitizedExams = exams.map((ex) => {
+        const obj = ex.toObject();
+        if (obj.examSections) {
+          obj.examSections.forEach((s) => {
+            if (s.questions) {
+              s.questions.forEach((q) => {
+                delete q.correctAnswer;
+                delete q.explanation;
+              });
+            }
+          });
+        }
+        return obj;
+      });
+    }
+
     res.status(200).json({
       success: true,
-      count: exams.length,
-      data: exams,
+      count: sanitizedExams.length,
+      data: sanitizedExams,
     });
   } catch (error) {
     next(error);
@@ -301,7 +332,7 @@ export const getExams = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 3. GET SINGLE EXAM BY ID (Sanitized for Students)
+// 3. GET SINGLE EXAM BY ID
 // -------------------------------------------------------------
 export const getExamById = async (req, res, next) => {
   try {
@@ -313,10 +344,8 @@ export const getExamById = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Examination not found' });
     }
 
-    // Clone to manipulate
     const examObj = exam.toObject();
 
-    // CRITICAL SECURITY: If caller is a student, NEVER leak correctAnswer or explanation!
     if (req.user.role === 'student') {
       if (examObj.examSections) {
         examObj.examSections.forEach((section) => {
@@ -324,10 +353,9 @@ export const getExamById = async (req, res, next) => {
             section.questions.forEach((q) => {
               delete q.correctAnswer;
               delete q.explanation;
-              // If match pairs, shuffle right side so answer is not revealed by order!
               if (q.matchPairs && Array.isArray(q.matchPairs)) {
                 const rightItems = q.matchPairs.map((p) => p.right).sort(() => Math.random() - 0.5);
-                q.matchPairs = q.matchPairs.map((p, idx) => ({
+                q.matchPairs = q.matchPairs.map((p) => ({
                   left: p.left,
                   rightOptions: rightItems,
                 }));
@@ -348,7 +376,7 @@ export const getExamById = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 4. UPDATE EXAM (Basic Info, Schedule, Rules)
+// 4. UPDATE EXAM
 // -------------------------------------------------------------
 export const updateExam = async (req, res, next) => {
   try {
@@ -357,7 +385,6 @@ export const updateExam = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Examination not found' });
     }
 
-    // Prevent modifying questions/rules once in progress or locked
     if (exam.isSnapshotLocked && req.body.examSections) {
       return res.status(400).json({
         success: false,
@@ -365,8 +392,7 @@ export const updateExam = async (req, res, next) => {
       });
     }
 
-    // Role verification
-    if (req.user.role === 'teacher' && exam.createdBy.toString() !== req.user._id.toString()) {
+    if (req.user.role === 'teacher' && exam.createdBy && exam.createdBy.toString() !== req.user._id.toString()) {
       return res.status(403).json({
         success: false,
         message: 'You are only authorized to edit exams you created',
@@ -389,7 +415,7 @@ export const updateExam = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 5. UPDATE QUESTION PAPER (Sections & Questions Builder)
+// 5. UPDATE QUESTION PAPER
 // -------------------------------------------------------------
 export const updateQuestionPaper = async (req, res, next) => {
   try {
@@ -414,7 +440,6 @@ export const updateQuestionPaper = async (req, res, next) => {
       });
     }
 
-    // Calculate total question marks across sections
     let calculatedTotal = 0;
     let totalQuestionsCount = 0;
 
@@ -425,7 +450,7 @@ export const updateQuestionPaper = async (req, res, next) => {
         secMarks += qMarks;
         totalQuestionsCount++;
         return {
-          questionId: q.questionId || q._id,
+          questionId: q.questionId || q._id || `q_${secIdx + 1}_${qIdx + 1}`,
           questionText: q.questionText,
           questionType: q.questionType,
           difficulty: q.difficulty || 'medium',
@@ -484,7 +509,7 @@ export const updateQuestionPaper = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 6. SUBMIT EXAM FOR REVIEW (Teacher -> Principal)
+// 6. SUBMIT EXAM FOR REVIEW
 // -------------------------------------------------------------
 export const submitForReview = async (req, res, next) => {
   try {
@@ -517,11 +542,11 @@ export const submitForReview = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 7. REVIEW EXAM (Principal/Admin Approves or Rejects)
+// 7. REVIEW EXAM
 // -------------------------------------------------------------
 export const reviewExam = async (req, res, next) => {
   try {
-    const { action, comments } = req.body; // action: 'approve' | 'reject'
+    const { action, comments } = req.body;
     const exam = await Examination.findById(req.params.id);
 
     if (!exam) {
@@ -557,7 +582,7 @@ export const reviewExam = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 8. SCHEDULE EXAM (Confirmed Date, Time & Availability)
+// 8. SCHEDULE, PUBLISH & CANCEL
 // -------------------------------------------------------------
 export const scheduleExam = async (req, res, next) => {
   try {
@@ -568,31 +593,148 @@ export const scheduleExam = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Examination not found' });
     }
 
-    if (exam.status !== 'approved' && exam.status !== 'scheduled') {
-      return res.status(400).json({
+    if (req.user.role === 'teacher' && exam.createdBy && exam.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
         success: false,
-        message: 'Only approved question papers can be scheduled',
+        message: 'You are only authorized to schedule exams you created',
       });
     }
 
-    if (examDate) exam.examDate = new Date(examDate);
-    if (startTime) exam.startTime = new Date(startTime);
-    if (endTime) exam.endTime = new Date(endTime);
-    if (durationMinutes) exam.durationMinutes = Number(durationMinutes);
-    if (sections) exam.sections = sections;
+    if (['in_progress', 'completed', 'results_published'].includes(exam.status) || exam.isSnapshotLocked) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot reschedule an examination that is already active, locked, or completed',
+      });
+    }
+
+    const effectiveDate = examDate ? new Date(examDate) : exam.examDate;
+    const effectiveStart = startTime ? new Date(startTime) : exam.startTime;
+    const effectiveEnd = endTime ? new Date(endTime) : exam.endTime;
+
+    if (!effectiveDate || isNaN(effectiveDate.getTime())) {
+      return res.status(400).json({ success: false, message: 'Valid examination date is required' });
+    }
+
+    if (!effectiveStart || isNaN(effectiveStart.getTime())) {
+      return res.status(400).json({ success: false, message: 'Valid start time is required' });
+    }
+
+    if (!effectiveEnd || isNaN(effectiveEnd.getTime())) {
+      return res.status(400).json({ success: false, message: 'Valid end time is required' });
+    }
+
+    if (effectiveEnd <= effectiveStart) {
+      return res.status(400).json({
+        success: false,
+        message: 'Examination end time must be later than start time',
+      });
+    }
+
+    const effectiveDuration = durationMinutes ? Number(durationMinutes) : (exam.durationMinutes || 60);
+    if (effectiveDuration <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Duration must be greater than 0 minutes',
+      });
+    }
+
+    const isReschedule = ['scheduled', 'published'].includes(exam.status) && (
+      (exam.startTime && effectiveStart.getTime() !== exam.startTime.getTime()) ||
+      (exam.endTime && effectiveEnd.getTime() !== exam.endTime.getTime()) ||
+      (exam.examDate && effectiveDate.getTime() !== exam.examDate.getTime())
+    );
+
+    exam.examDate = effectiveDate;
+    exam.startTime = effectiveStart;
+    exam.endTime = effectiveEnd;
+    exam.durationMinutes = effectiveDuration;
+    if (sections && Array.isArray(sections) && sections.length > 0) {
+      exam.sections = sections;
+    }
 
     exam.status = 'scheduled';
     await exam.save();
 
-    await logAuditEvent(exam._id, req.user._id, req.user.role, 'EXAM_SCHEDULED', {
+    await notifyStudentsExamScheduled(exam, isReschedule);
+
+    await logAuditEvent(exam._id, req.user._id, req.user.role, isReschedule ? 'EXAM_RESCHEDULED' : 'EXAM_SCHEDULED', {
       examDate: exam.examDate,
       startTime: exam.startTime,
       endTime: exam.endTime,
+      durationMinutes: exam.durationMinutes,
+      sections: exam.sections,
     });
 
     res.status(200).json({
       success: true,
-      message: 'Examination scheduled successfully',
+      message: isReschedule ? 'Examination rescheduled successfully' : 'Examination scheduled successfully',
+      data: exam,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const publishExam = async (req, res, next) => {
+  try {
+    const exam = await Examination.findById(req.params.id);
+    if (!exam) {
+      return res.status(404).json({ success: false, message: 'Examination not found' });
+    }
+
+    if (req.user.role === 'teacher' && exam.createdBy && exam.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Unauthorized to publish this exam' });
+    }
+
+    if (['in_progress', 'completed', 'results_published'].includes(exam.status)) {
+      return res.status(400).json({ success: false, message: 'Cannot modify an ongoing or completed exam' });
+    }
+
+    const questionCount = exam.examSections.reduce((acc, s) => acc + (s.questions?.length || 0), 0);
+    if (questionCount === 0) {
+      return res.status(400).json({ success: false, message: 'Cannot publish an exam with 0 questions' });
+    }
+
+    exam.status = 'published';
+    await exam.save();
+
+    await notifyStudentsExamScheduled(exam, false);
+    await logAuditEvent(exam._id, req.user._id, req.user.role, 'EXAM_PUBLISHED');
+
+    res.status(200).json({
+      success: true,
+      message: 'Examination published successfully and visible to eligible students',
+      data: exam,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const cancelExam = async (req, res, next) => {
+  try {
+    const exam = await Examination.findById(req.params.id);
+    if (!exam) {
+      return res.status(404).json({ success: false, message: 'Examination not found' });
+    }
+
+    if (req.user.role === 'teacher' && exam.createdBy && exam.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Unauthorized to cancel this exam' });
+    }
+
+    if (['completed', 'results_published'].includes(exam.status)) {
+      return res.status(400).json({ success: false, message: 'Cannot cancel an already completed examination' });
+    }
+
+    exam.status = 'cancelled';
+    await exam.save();
+
+    await notifyStudentsExamCancelled(exam);
+    await logAuditEvent(exam._id, req.user._id, req.user.role, 'EXAM_CANCELLED');
+
+    res.status(200).json({
+      success: true,
+      message: 'Examination cancelled and eligible students notified',
       data: exam,
     });
   } catch (error) {
@@ -601,7 +743,7 @@ export const scheduleExam = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 9. START EXAM ATTEMPT (Student Dedicated Portal)
+// 9. START OR RESUME ATTEMPT
 // -------------------------------------------------------------
 export const startExamAttempt = async (req, res, next) => {
   try {
@@ -610,7 +752,28 @@ export const startExamAttempt = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Examination not found' });
     }
 
-    // Verification of Class & Section
+    if (exam.status === 'cancelled') {
+      return res.status(400).json({
+        success: false,
+        message: 'This examination has been cancelled and cannot be started',
+      });
+    }
+
+    if (['draft', 'submitted_for_review', 'rejected'].includes(exam.status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'This examination has not yet been scheduled or published',
+      });
+    }
+
+    const serverNowCheck = new Date();
+    if (exam.startTime && serverNowCheck < new Date(exam.startTime) && !exam.isPracticeMode) {
+      return res.status(400).json({
+        success: false,
+        message: `This examination is scheduled to start at ${new Date(exam.startTime).toLocaleString()}`,
+      });
+    }
+
     const studentClass = req.user.studentProfile?.classGrade;
     const studentSection = req.user.studentProfile?.section;
 
@@ -630,29 +793,15 @@ export const startExamAttempt = async (req, res, next) => {
       }
     }
 
-    // Check existing attempts
     const existingAttempts = await ExaminationAttempt.find({
       student: req.user._id,
       examination: exam._id,
     }).sort({ attemptNumber: -1 });
 
     const activeAttempt = existingAttempts.find((att) => att.status === 'in_progress');
-    const completedAttemptsCount = existingAttempts.filter((att) =>
-      ['submitted', 'auto_submitted', 'evaluation_pending', 'evaluated', 'result_published'].includes(att.status)
-    ).length;
 
-    // Check Max Attempts
-    if (completedAttemptsCount >= (exam.maxAttempts || 1)) {
-      return res.status(403).json({
-        success: false,
-        message: `You have exhausted the maximum allowed attempts (${exam.maxAttempts || 1}) for this examination`,
-      });
-    }
-
-    // If an attempt is currently in progress, return it
     if (activeAttempt) {
       const serverNow = new Date();
-      // Check if deadline has passed
       if (serverNow > activeAttempt.deadline) {
         activeAttempt.status = 'auto_submitted';
         activeAttempt.submittedAt = serverNow;
@@ -661,18 +810,21 @@ export const startExamAttempt = async (req, res, next) => {
 
         return res.status(400).json({
           success: false,
-          message: 'The examination time limit has expired. Your attempt has been automatically submitted.',
+          message: 'The examination time limit has expired while away.',
         });
       }
 
-      // Return ongoing attempt with sanitized exam questions
       const sanitizedExam = exam.toObject();
-      sanitizedExam.examSections.forEach((s) =>
-        s.questions.forEach((q) => {
+      (sanitizedExam.examSections || []).forEach((s) =>
+        (s.questions || []).forEach((q) => {
           delete q.correctAnswer;
           delete q.explanation;
         })
       );
+
+      await logAuditEvent(exam._id, req.user._id, req.user.role, 'ATTEMPT_RESUMED', {
+        attemptId: activeAttempt._id,
+      });
 
       return res.status(200).json({
         success: true,
@@ -686,24 +838,33 @@ export const startExamAttempt = async (req, res, next) => {
       });
     }
 
-    // Start New Attempt: Authoritative Server Deadline Calculation
+    const completedAttempts = existingAttempts.filter((att) =>
+      ['submitted', 'auto_submitted', 'evaluation_pending', 'evaluated', 'result_published'].includes(att.status)
+    );
+
+    if (!exam.isPracticeMode && completedAttempts.length >= (exam.maxAttempts || 1)) {
+      return res.status(403).json({
+        success: false,
+        message: `You have exhausted the maximum allowed attempts (${exam.maxAttempts || 1}) for this examination`,
+      });
+    }
+
     const serverNow = new Date();
     const durationMs = (exam.durationMinutes || 60) * 60 * 1000;
     let deadline = new Date(serverNow.getTime() + durationMs);
 
-    // If exam has a strict endTime, deadline cannot exceed exam.endTime
     if (exam.endTime && exam.endTime < deadline) {
       deadline = new Date(exam.endTime);
     }
 
-    // Initialize answer slots from exam sections
     const initialAnswers = [];
-    exam.examSections.forEach((section) => {
-      section.questions.forEach((q) => {
+    (exam.examSections || []).forEach((section, sIdx) => {
+      (section.questions || []).forEach((q, qIdx) => {
+        const qId = getQuestionId(q, `q_${section.id || sIdx}_${qIdx}`);
         initialAnswers.push({
-          questionId: q.questionId ? q.questionId.toString() : q._id.toString(),
-          sectionId: section.id,
-          questionType: q.questionType,
+          questionId: qId,
+          sectionId: section.id || `sec_${sIdx + 1}`,
+          questionType: q?.questionType || 'single_mcq',
           studentAnswer: null,
           isAnswered: false,
           isMarkedForReview: false,
@@ -719,7 +880,7 @@ export const startExamAttempt = async (req, res, next) => {
     const newAttempt = await ExaminationAttempt.create({
       student: req.user._id,
       examination: exam._id,
-      attemptNumber: completedAttemptsCount + 1,
+      attemptNumber: completedAttempts.length + 1,
       examVersion: exam.version || 1,
       startedAt: serverNow,
       deadline,
@@ -733,7 +894,6 @@ export const startExamAttempt = async (req, res, next) => {
       },
     });
 
-    // Lock snapshot once students begin taking the exam
     if (!exam.isSnapshotLocked) {
       exam.isSnapshotLocked = true;
       if (exam.status === 'scheduled') {
@@ -747,10 +907,9 @@ export const startExamAttempt = async (req, res, next) => {
       attemptNumber: newAttempt.attemptNumber,
     });
 
-    // Sanitized Exam Object for student
     const sanitizedExam = exam.toObject();
-    sanitizedExam.examSections.forEach((s) =>
-      s.questions.forEach((q) => {
+    (sanitizedExam.examSections || []).forEach((s) =>
+      (s.questions || []).forEach((q) => {
         delete q.correctAnswer;
         delete q.explanation;
       })
@@ -772,7 +931,7 @@ export const startExamAttempt = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 10. SAVE STUDENT ANSWER (Incremental Autosave)
+// 10. SAVE STUDENT ANSWER (Body Payload)
 // -------------------------------------------------------------
 export const saveStudentAnswer = async (req, res, next) => {
   try {
@@ -794,7 +953,6 @@ export const saveStudentAnswer = async (req, res, next) => {
       });
     }
 
-    // Server-Side Deadline Enforcement
     const serverNow = new Date();
     if (serverNow > attempt.deadline) {
       attempt.status = 'auto_submitted';
@@ -809,7 +967,6 @@ export const saveStudentAnswer = async (req, res, next) => {
       });
     }
 
-    // Find or create question slot in attempt
     let answerSlot = attempt.answers.find((a) => a.questionId === String(questionId));
     const isAnswered = studentAnswer !== undefined && studentAnswer !== null && studentAnswer !== '';
 
@@ -846,7 +1003,134 @@ export const saveStudentAnswer = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 11. RECORD TAB SWITCH (Anti-Cheat Logging)
+// 10B. SAVE STUDENT ANSWER (Direct Route: PUT /attempts/:attemptId/answers/:questionId)
+// -------------------------------------------------------------
+export const saveAttemptAnswerDirect = async (req, res, next) => {
+  try {
+    const { attemptId, questionId } = req.params;
+    const { studentAnswer, isMarkedForReview, visited, questionType } = req.body;
+
+    const attempt = await ExaminationAttempt.findById(attemptId);
+    if (!attempt) {
+      return res.status(404).json({ success: false, message: 'Examination attempt not found' });
+    }
+
+    if (attempt.student.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Unauthorized attempt access' });
+    }
+
+    if (attempt.status !== 'in_progress') {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot save response: this examination attempt is no longer in progress',
+      });
+    }
+
+    const serverNow = new Date();
+    if (serverNow > attempt.deadline) {
+      attempt.status = 'auto_submitted';
+      attempt.submittedAt = serverNow;
+      attempt.submissionType = 'auto_timeout';
+      await attempt.save();
+
+      return res.status(400).json({
+        success: false,
+        isExpired: true,
+        message: 'Exam timeout expired. Attempt has been auto-submitted.',
+      });
+    }
+
+    let answerSlot = attempt.answers.find((a) => a.questionId === String(questionId));
+    const isAnswered = studentAnswer !== undefined && studentAnswer !== null && studentAnswer !== '';
+
+    if (answerSlot) {
+      answerSlot.studentAnswer = studentAnswer;
+      answerSlot.isAnswered = isAnswered;
+      if (isMarkedForReview !== undefined) answerSlot.isMarkedForReview = isMarkedForReview;
+      if (visited !== undefined) answerSlot.visited = visited;
+      answerSlot.lastSavedAt = serverNow;
+    } else {
+      attempt.answers.push({
+        questionId: String(questionId),
+        sectionId: 'sec_1',
+        questionType: questionType || 'single_mcq',
+        studentAnswer,
+        isAnswered,
+        isMarkedForReview: !!isMarkedForReview,
+        visited: true,
+        lastSavedAt: serverNow,
+      });
+    }
+
+    await attempt.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Response saved successfully',
+      lastSavedAt: serverNow,
+      timeRemainingSeconds: Math.max(0, Math.floor((attempt.deadline - serverNow) / 1000)),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// -------------------------------------------------------------
+// 10C. HEARTBEAT KEEP-ALIVE (POST /attempts/:attemptId/heartbeat)
+// -------------------------------------------------------------
+export const attemptHeartbeat = async (req, res, next) => {
+  try {
+    const attemptId = req.params.attemptId || req.body.attemptId;
+    const attempt = await ExaminationAttempt.findById(attemptId);
+
+    if (!attempt) {
+      return res.status(404).json({ success: false, message: 'Examination attempt not found' });
+    }
+
+    const serverNow = new Date();
+
+    if (attempt.status !== 'in_progress') {
+      return res.status(200).json({
+        success: false,
+        status: attempt.status,
+        isCompleted: true,
+        message: 'Attempt is no longer in progress',
+      });
+    }
+
+    if (serverNow > attempt.deadline) {
+      attempt.status = 'auto_submitted';
+      attempt.submittedAt = serverNow;
+      attempt.submissionType = 'auto_timeout';
+      await attempt.save();
+
+      return res.status(200).json({
+        success: false,
+        isExpired: true,
+        status: 'auto_submitted',
+        timeRemainingSeconds: 0,
+        message: 'Exam timeout expired',
+      });
+    }
+
+    attempt.lastHeartbeat = serverNow;
+    await attempt.save();
+
+    const timeRemainingSeconds = Math.max(0, Math.floor((attempt.deadline - serverNow) / 1000));
+
+    res.status(200).json({
+      success: true,
+      serverTime: serverNow,
+      timeRemainingSeconds,
+      status: attempt.status,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// -------------------------------------------------------------
+// 11. RECORD TAB SWITCH
 // -------------------------------------------------------------
 export const recordTabSwitch = async (req, res, next) => {
   try {
@@ -855,10 +1139,14 @@ export const recordTabSwitch = async (req, res, next) => {
 
     if (attempt && attempt.status === 'in_progress') {
       attempt.tabSwitchesCount = (attempt.tabSwitchesCount || 0) + 1;
+      if (!Array.isArray(attempt.tabSwitchLogs)) {
+        attempt.tabSwitchLogs = [];
+      }
       attempt.tabSwitchLogs.push({
         timestamp: new Date(),
         reason: reason || 'Focus lost: Tab switch or window blur',
       });
+      attempt.lastHeartbeat = new Date();
       await attempt.save();
 
       await logAuditEvent(attempt.examination, req.user._id, req.user.role, 'TAB_SWITCH_RECORDED', {
@@ -877,13 +1165,18 @@ export const recordTabSwitch = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 12. SUBMIT EXAMINATION (Manual or Auto-Timeout)
+// 12. SUBMIT EXAMINATION ATTEMPT
 // -------------------------------------------------------------
 export const submitExamAttempt = async (req, res, next) => {
   try {
-    const { attemptId, submissionType = 'manual' } = req.body;
-    const attempt = await ExaminationAttempt.findById(attemptId);
+    const attemptId = req.body.attemptId || req.params.attemptId || req.body.id;
+    const submissionType = req.body.submissionType || 'manual';
 
+    if (!attemptId) {
+      return res.status(400).json({ success: false, message: 'Attempt ID is required for submission' });
+    }
+
+    const attempt = await ExaminationAttempt.findById(attemptId);
     if (!attempt) {
       return res.status(404).json({ success: false, message: 'Examination attempt not found' });
     }
@@ -908,21 +1201,21 @@ export const submitExamAttempt = async (req, res, next) => {
     attempt.submittedAt = serverNow;
     attempt.submissionType = submissionType;
 
-    // RUN AUTOMATIC EVALUATION ENGINE
     let autoScore = 0;
     let hasSubjectiveQuestions = false;
     const sectionScores = {};
 
-    exam.examSections.forEach((sec) => {
-      sectionScores[sec.id] = {
-        sectionId: sec.id,
-        title: sec.title,
+    (exam.examSections || []).forEach((sec, sIdx) => {
+      const sId = sec.id || `sec_${sIdx + 1}`;
+      sectionScores[sId] = {
+        sectionId: sId,
+        title: sec.title || `Section ${sIdx + 1}`,
         marksObtained: 0,
         maxMarks: sec.totalMarks || 0,
       };
 
-      sec.questions.forEach((q) => {
-        const qId = (q.questionId ? q.questionId.toString() : q._id.toString());
+      (sec.questions || []).forEach((q, qIdx) => {
+        const qId = getQuestionId(q, `q_${sId}_${qIdx}`);
         const ansSlot = attempt.answers.find((a) => a.questionId === qId);
 
         const evalResult = autoEvaluateQuestion(
@@ -942,8 +1235,8 @@ export const submitExamAttempt = async (req, res, next) => {
           hasSubjectiveQuestions = true;
         } else {
           autoScore += evalResult.marksAwarded;
-          if (sectionScores[sec.id]) {
-            sectionScores[sec.id].marksObtained += evalResult.marksAwarded;
+          if (sectionScores[sId]) {
+            sectionScores[sId].marksObtained += evalResult.marksAwarded;
           }
         }
       });
@@ -962,7 +1255,6 @@ export const submitExamAttempt = async (req, res, next) => {
       attempt.status = 'evaluated';
     }
 
-    // If exam has immediate result publication configured
     if (exam.resultPublicationMode === 'immediate') {
       attempt.isResultPublished = true;
       attempt.resultPublishedAt = serverNow;
@@ -994,7 +1286,34 @@ export const submitExamAttempt = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 13. GET SUBMISSIONS FOR TEACHER / PRINCIPAL EVALUATION
+// 13. RESET ATTEMPTS
+// -------------------------------------------------------------
+export const resetStudentAttempts = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const targetStudentId = req.body.studentId || req.user._id;
+
+    const result = await ExaminationAttempt.deleteMany({
+      examination: id,
+      student: targetStudentId,
+    });
+
+    await logAuditEvent(id, req.user._id, req.user.role, 'ATTEMPTS_RESET', {
+      targetStudentId,
+      deletedCount: result.deletedCount,
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `Reset successful: ${result.deletedCount} attempt(s) removed. You can now retake the exam.`,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// -------------------------------------------------------------
+// 14. GET SUBMISSIONS FOR TEACHER / PRINCIPAL EVALUATION
 // -------------------------------------------------------------
 export const getExamSubmissions = async (req, res, next) => {
   try {
@@ -1021,7 +1340,7 @@ export const getExamSubmissions = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 14. GET SINGLE ATTEMPT FOR EVALUATION
+// 15. GET SINGLE ATTEMPT FOR EVALUATION
 // -------------------------------------------------------------
 export const getAttemptForEvaluation = async (req, res, next) => {
   try {
@@ -1044,12 +1363,12 @@ export const getAttemptForEvaluation = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 15. SAVE MANUAL EVALUATION (Teacher Scoring for Subjective Qs)
+// 16. SAVE MANUAL EVALUATION
 // -------------------------------------------------------------
 export const saveManualEvaluation = async (req, res, next) => {
   try {
     const { attemptId } = req.params;
-    const { evaluations, evaluationNotes } = req.body; // Array of { questionId, marksAwarded, feedback }
+    const { evaluations, evaluationNotes } = req.body;
 
     const attempt = await ExaminationAttempt.findById(attemptId);
     if (!attempt) {
@@ -1063,8 +1382,7 @@ export const saveManualEvaluation = async (req, res, next) => {
 
     let manualScore = 0;
 
-    // Apply manual scores
-    evaluations.forEach((item) => {
+    (evaluations || []).forEach((item) => {
       const slot = attempt.answers.find((a) => a.questionId === item.questionId);
       if (slot) {
         slot.marksAwarded = Number(item.marksAwarded) || 0;
@@ -1104,7 +1422,7 @@ export const saveManualEvaluation = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 16. PUBLISH / UNPUBLISH RESULTS (Principal / SuperAdmin)
+// 17. TOGGLE PUBLISH RESULTS
 // -------------------------------------------------------------
 export const togglePublishResults = async (req, res, next) => {
   try {
@@ -1120,7 +1438,6 @@ export const togglePublishResults = async (req, res, next) => {
     exam.resultPublicationDate = publish ? new Date() : null;
     await exam.save();
 
-    // Update all attempts
     await ExaminationAttempt.updateMany(
       { examination: examId, status: { $in: ['evaluated', 'submitted', 'auto_submitted', 'evaluation_pending', 'result_published'] } },
       {
@@ -1131,6 +1448,10 @@ export const togglePublishResults = async (req, res, next) => {
         },
       }
     );
+
+    if (publish) {
+      await notifyStudentsResultsPublished(exam);
+    }
 
     await logAuditEvent(
       exam._id,
@@ -1150,7 +1471,7 @@ export const togglePublishResults = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 17. GET EXAM ANALYTICS DASHBOARD
+// 18. GET EXAM ANALYTICS DASHBOARD
 // -------------------------------------------------------------
 export const getExamAnalytics = async (req, res, next) => {
   try {
@@ -1161,7 +1482,6 @@ export const getExamAnalytics = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Examination not found' });
     }
 
-    // Eligible candidates count
     const studentQuery = { role: 'student', 'studentProfile.classGrade': exam.classGrade };
     if (exam.sections && exam.sections.length > 0) {
       studentQuery['studentProfile.section'] = { $in: exam.sections };
@@ -1185,16 +1505,15 @@ export const getExamAnalytics = async (req, res, next) => {
     const averageScore = scores.length > 0 ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : 0;
     const passPercentage = submittedAttempts.length > 0 ? ((passedCount / submittedAttempts.length) * 100).toFixed(1) : 0;
 
-    // Question-wise performance breakdown
     const questionPerformance = [];
-    exam.examSections.forEach((sec) => {
-      sec.questions.forEach((q) => {
-        const qId = q.questionId ? q.questionId.toString() : q._id.toString();
+    (exam.examSections || []).forEach((sec, sIdx) => {
+      (sec.questions || []).forEach((q, qIdx) => {
+        const qId = getQuestionId(q, `q_${sec.id || sIdx}_${qIdx}`);
         let totalAttempted = 0;
         let correctCount = 0;
 
         submittedAttempts.forEach((att) => {
-          const ans = att.answers.find((a) => a.questionId === qId);
+          const ans = (att.answers || []).find((a) => a.questionId === qId);
           if (ans && ans.isAnswered) {
             totalAttempted++;
             if (ans.marksAwarded > 0) correctCount++;
@@ -1204,9 +1523,9 @@ export const getExamAnalytics = async (req, res, next) => {
         questionPerformance.push({
           questionId: qId,
           sectionTitle: sec.title,
-          questionText: q.questionText,
-          questionType: q.questionType,
-          marks: q.marks,
+          questionText: q?.questionText || '',
+          questionType: q?.questionType || '',
+          marks: q?.marks || 0,
           totalAttempted,
           correctCount,
           accuracyRate: totalAttempted > 0 ? Math.round((correctCount / totalAttempted) * 100) : 0,
@@ -1252,7 +1571,7 @@ export const getExamAnalytics = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 18. GET STUDENT RESULT & QUESTION REVIEW
+// 19. GET STUDENT RESULT
 // -------------------------------------------------------------
 export const getStudentResult = async (req, res, next) => {
   try {
@@ -1280,7 +1599,6 @@ export const getStudentResult = async (req, res, next) => {
       });
     }
 
-    // If caller is student and results are NOT published (and not practice mode)
     if (req.user.role === 'student' && !attempt.isResultPublished && !exam.isPracticeMode) {
       return res.status(200).json({
         success: true,
@@ -1296,27 +1614,26 @@ export const getStudentResult = async (req, res, next) => {
       });
     }
 
-    // Full detailed review with questions, student answers, correct answers, explanations
     const detailedReview = [];
-    exam.examSections.forEach((sec) => {
-      sec.questions.forEach((q) => {
-        const qId = q.questionId ? q.questionId.toString() : q._id.toString();
-        const ansSlot = attempt.answers.find((a) => a.questionId === qId);
+    (exam.examSections || []).forEach((sec, sIdx) => {
+      (sec.questions || []).forEach((q, qIdx) => {
+        const qId = getQuestionId(q, `q_${sec.id || sIdx}_${qIdx}`);
+        const ansSlot = (attempt.answers || []).find((a) => a.questionId === qId);
 
         detailedReview.push({
           questionId: qId,
           sectionTitle: sec.title,
-          questionText: q.questionText,
-          questionType: q.questionType,
-          marks: q.marks,
-          options: q.options,
-          matchPairs: q.matchPairs,
-          passageText: q.passageText,
-          imageUrl: q.imageUrl,
+          questionText: q?.questionText || '',
+          questionType: q?.questionType || '',
+          marks: q?.marks || 0,
+          options: q?.options || [],
+          matchPairs: q?.matchPairs || [],
+          passageText: q?.passageText || '',
+          imageUrl: q?.imageUrl || '',
           studentAnswer: ansSlot ? ansSlot.studentAnswer : null,
           isAnswered: ansSlot ? ansSlot.isAnswered : false,
-          correctAnswer: q.correctAnswer,
-          explanation: q.explanation,
+          correctAnswer: q?.correctAnswer,
+          explanation: q?.explanation,
           marksAwarded: ansSlot ? ansSlot.marksAwarded : 0,
           evaluatorFeedback: ansSlot ? ansSlot.evaluatorFeedback : '',
         });
@@ -1330,6 +1647,112 @@ export const getStudentResult = async (req, res, next) => {
         exam,
         attempt,
         detailedReview,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// -------------------------------------------------------------
+// 20. GET LIVE EXAM MONITOR (FIXES 404 /api/exams/:id/monitor)
+// -------------------------------------------------------------
+export const getExamMonitor = async (req, res, next) => {
+  try {
+    const examId = req.params.examId || req.params.id;
+
+    const exam = await Examination.findById(examId);
+    if (!exam) {
+      return res.status(404).json({
+        success: false,
+        message: 'Examination not found',
+      });
+    }
+
+    // 1. Fetch eligible student count for this exam's class and sections
+    const studentQuery = { role: 'student', 'studentProfile.classGrade': exam.classGrade };
+    if (exam.sections && exam.sections.length > 0) {
+      studentQuery['studentProfile.section'] = { $in: exam.sections };
+    }
+    const totalEligible = await User.countDocuments(studentQuery);
+
+    // 2. Fetch all student attempts for this examination
+    const attempts = await ExaminationAttempt.find({ examination: examId })
+      .populate('student', 'name email schoolId studentProfile')
+      .sort({ updatedAt: -1 });
+
+    const now = Date.now();
+    const HEARTBEAT_WINDOW_MS = 60 * 1000; // 60 seconds
+
+    // 3. Calculate telemetry & proctoring status for each student
+    const studentAttempts = attempts.map((att) => {
+      const lastPingTime = att.lastHeartbeat
+        ? new Date(att.lastHeartbeat).getTime()
+        : new Date(att.updatedAt || att.startedAt).getTime();
+      const isOnline = att.status === 'in_progress' && now - lastPingTime < HEARTBEAT_WINDOW_MS;
+
+      const answeredQuestions = (att.answers || []).filter(
+        (a) => a.studentAnswer !== undefined && a.studentAnswer !== null && a.studentAnswer !== ''
+      ).length;
+
+      const totalQuestions = (exam.examSections || []).reduce(
+        (total, s) => total + (s.questions?.length || 0),
+        0
+      );
+
+      return {
+        _id: att._id,
+        studentId: att.student?._id,
+        studentName: att.student?.name || 'Unknown Student',
+        rollNumber: att.student?.studentProfile?.rollNumber || 'N/A',
+        section: att.student?.studentProfile?.section || 'N/A',
+        email: att.student?.email || '',
+        status: att.status,
+        isOnline,
+        startedAt: att.startedAt,
+        deadline: att.deadline,
+        submittedAt: att.submittedAt,
+        tabSwitchesCount: att.tabSwitchesCount || 0,
+        tabSwitchLogs: att.tabSwitchLogs || [],
+        answeredCount: answeredQuestions,
+        totalQuestions,
+        completionPercentage: totalQuestions > 0 ? Math.round((answeredQuestions / totalQuestions) * 100) : 0,
+        score: att.score?.totalScore ?? null,
+        isPassed: att.score?.isPassed ?? null,
+      };
+    });
+
+    // 4. Summary metrics
+    const stats = {
+      totalEligible,
+      totalStarted: studentAttempts.length,
+      currentlyOnline: studentAttempts.filter((a) => a.isOnline).length,
+      inProgress: studentAttempts.filter((a) => a.status === 'in_progress').length,
+      submitted: studentAttempts.filter((a) =>
+        ['submitted', 'auto_submitted', 'evaluation_pending', 'evaluated', 'result_published'].includes(a.status)
+      ).length,
+      tabSwitchWarnings: studentAttempts.filter((a) => (a.tabSwitchesCount || 0) > 0).length,
+    };
+
+    res.status(200).json({
+      success: true,
+      data: {
+        exam: {
+          _id: exam._id,
+          title: exam.title,
+          examCode: exam.examCode,
+          classGrade: exam.classGrade,
+          sections: exam.sections,
+          subject: exam.subject,
+          status: exam.status,
+          startTime: exam.startTime,
+          endTime: exam.endTime,
+          durationMinutes: exam.durationMinutes,
+          totalMarks: exam.totalMarks,
+          tabSwitchLimit: exam.tabSwitchLimit || 3,
+        },
+        stats,
+        attempts: studentAttempts,
       },
     });
   } catch (error) {

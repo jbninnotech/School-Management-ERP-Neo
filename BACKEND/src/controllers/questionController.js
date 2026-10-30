@@ -1,128 +1,177 @@
-import Question from '../models/questionModel.js';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
 
-// @desc    Create Question in Question Bank
-// @route   POST /api/questions
-export const createQuestion = async (req, res, next) => {
+const mammoth = require('mammoth');
+const xlsx = require('xlsx');
+
+// Safe, universal PDF extractor (works with both v1 functions and v2 classes)
+const extractPdfText = async (fileBuffer) => {
+  let pdfLib;
   try {
-    const {
-      classGrade,
-      subject,
-      chapter,
-      topic,
-      questionType,
-      difficulty,
-      marks,
-      negativeMarks,
-      questionText,
-      instructionText,
-      passageText,
-      imageUrl,
-      options,
-      matchPairs,
-      correctAnswer,
-      numericalTolerance,
-      explanation,
-      tags,
-      estimatedTimeMinutes,
-    } = req.body;
-
-    if (!classGrade || !subject || !questionType || !questionText) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide class, subject, question type, and question text',
-      });
-    }
-
-    if (correctAnswer === undefined || correctAnswer === null || correctAnswer === '') {
-      return res.status(400).json({
-        success: false,
-        message: 'Correct answer / answer key is required for question creation',
-      });
-    }
-
-    const question = await Question.create({
-      schoolId: req.user.schoolId || 'SCH-DEFAULT',
-      academicYear: '2025-2026',
-      classGrade,
-      subject,
-      chapter: chapter || '',
-      topic: topic || '',
-      questionType,
-      difficulty: difficulty || 'medium',
-      marks: Number(marks) || 1,
-      negativeMarks: Number(negativeMarks) || 0,
-      questionText,
-      instructionText: instructionText || '',
-      passageText: passageText || '',
-      imageUrl: imageUrl || '',
-      options: options || [],
-      matchPairs: matchPairs || [],
-      correctAnswer,
-      numericalTolerance: Number(numericalTolerance) || 0,
-      explanation: explanation || '',
-      tags: Array.isArray(tags) ? tags : typeof tags === 'string' ? tags.split(',').map((t) => t.trim()) : [],
-      estimatedTimeMinutes: Number(estimatedTimeMinutes) || 2,
-      createdBy: req.user._id,
-      status: 'approved',
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'Question added to Question Bank successfully',
-      data: question,
-    });
-  } catch (error) {
-    next(error);
+    pdfLib = require('pdf-parse');
+  } catch (e) {
+    pdfLib = require('pdf-parse/lib/pdf-parse.js');
   }
+
+  // 1. Try calling directly as a function (pdf-parse v1.1.1)
+  try {
+    if (typeof pdfLib === 'function' && !pdfLib.toString().startsWith('class')) {
+      const result = await pdfLib(fileBuffer);
+      return result?.text || '';
+    }
+  } catch (err) {
+    if (!err.message?.includes('Class constructor')) {
+      throw err;
+    }
+  }
+
+  // 2. Fallback: If installed as a class (pdf-parse v2)
+  try {
+    const PDFClass = typeof pdfLib === 'function' ? pdfLib : (pdfLib.PDFParse || pdfLib.default);
+    if (PDFClass) {
+      let instance;
+      try {
+        instance = new PDFClass(fileBuffer);
+      } catch (_) {
+        instance = new PDFClass();
+      }
+
+      if (typeof instance.getText === 'function') {
+        const text = await instance.getText();
+        return text || '';
+      }
+      if (typeof instance.parse === 'function') {
+        const res = await instance.parse(fileBuffer);
+        return res?.text || (typeof res === 'string' ? res : '');
+      }
+      if (typeof instance.then === 'function') {
+        const res = await instance;
+        return res?.text || '';
+      }
+    }
+  } catch (classErr) {
+    console.error('PDF class parser error:', classErr);
+  }
+
+  // 3. Fallback: direct internal lib
+  try {
+    const directLib = require('pdf-parse/lib/pdf-parse.js');
+    if (typeof directLib === 'function') {
+      const res = await directLib(fileBuffer);
+      return res?.text || '';
+    }
+  } catch (_) {}
+
+  throw new Error('Unable to extract text from PDF. Please run: npm install pdf-parse@1.1.1');
 };
 
-// @desc    Get Questions with search, filters & pagination
-// @route   GET /api/questions
+import Question from '../models/questionModel.js';
+
+// ==========================================
+// Helper: Universal Text Parser for PDF & Word
+// ==========================================
+const parseTextToQuestions = (rawText, defaultClass, defaultSubject) => {
+  const questions = [];
+  // Split on "1.", "Q1.", "Question 1:", "1)"
+  const rawBlocks = rawText.split(/(?=(?:(?:Q|Question)\s*\d+[\.:\)]|\b\d+[\.:\)]))\s*/i);
+
+  for (const block of rawBlocks) {
+    if (!block.trim() || block.length < 10) continue;
+
+    const lines = block
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
+
+    if (lines.length === 0) continue;
+
+    const stemLine = lines[0].replace(/^(?:(?:Q|Question)\s*\d+[\.:\)]|\b\d+[\.:\)])\s*/i, '').trim();
+    if (!stemLine) continue;
+
+    const options = [];
+    let correctAnswer = 'opt_1';
+    let explanation = '';
+    let questionText = stemLine;
+
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i];
+
+      // Match options: A) ... or (A) ... or A. ...
+      const optMatch = line.match(/^[\(\[]?([A-Da-d])[\)\]\.:\-]\s*(.+)$/);
+      // Match answer keys: Ans: B or Answer: B or Key: A
+      const ansMatch = line.match(/^(?:Answer|Ans|Correct|Key)[\s:\-]+([A-Da-d0-9\w]+)/i);
+      // Match explanations: Solution: ... or Explanation: ...
+      const expMatch = line.match(/^(?:Explanation|Sol|Solution)[\s:\-]+(.+)$/i);
+
+      if (optMatch) {
+        const letter = optMatch[1].toUpperCase();
+        const optNum = letter.charCodeAt(0) - 64; // A->1, B->2, C->3, D->4
+        options.push({
+          id: `opt_${optNum}`,
+          text: optMatch[2].trim(),
+        });
+      } else if (ansMatch) {
+        const keyLetter = ansMatch[1].toUpperCase();
+        const optNum = keyLetter.charCodeAt(0) - 64;
+        if (optNum >= 1 && optNum <= 4) {
+          correctAnswer = `opt_${optNum}`;
+        } else {
+          correctAnswer = ansMatch[1].trim();
+        }
+      } else if (expMatch) {
+        explanation = expMatch[1].trim();
+      } else if (options.length === 0) {
+        questionText += ' ' + line;
+      }
+    }
+
+    if (questionText.trim()) {
+      questions.push({
+        classGrade: defaultClass || 'Class 10',
+        subject: defaultSubject || 'General',
+        questionType: options.length > 0 ? 'single_mcq' : 'short_answer',
+        difficulty: 'medium',
+        marks: options.length > 0 ? 1 : 2,
+        negativeMarks: 0,
+        questionText: questionText.trim(),
+        options: options.length > 0 ? options : [],
+        correctAnswer: options.length > 0 ? correctAnswer : 'N/A',
+        explanation: explanation || '',
+      });
+    }
+  }
+
+  return questions;
+};
+
+// ==========================================
+// 1. GET ALL QUESTIONS WITH FILTERS
+// ==========================================
 export const getQuestions = async (req, res, next) => {
   try {
-    const {
-      classGrade,
-      subject,
-      chapter,
-      difficulty,
-      questionType,
-      search,
-      page = 1,
-      limit = 50,
-      status,
-    } = req.query;
+    const { classGrade, subject, difficulty, questionType, search } = req.query;
+    const filter = { isArchived: { $ne: true } };
 
-    const query = { isArchived: { $ne: true } };
-
-    if (classGrade) query.classGrade = classGrade;
-    if (subject) query.subject = subject;
-    if (chapter) query.chapter = new RegExp(chapter, 'i');
-    if (difficulty) query.difficulty = difficulty;
-    if (questionType) query.questionType = questionType;
-    if (status) query.status = status;
+    if (classGrade) filter.classGrade = classGrade;
+    if (subject) filter.subject = subject;
+    if (difficulty) filter.difficulty = difficulty;
+    if (questionType) filter.questionType = questionType;
 
     if (search) {
-      query.$or = [
+      filter.$or = [
         { questionText: { $regex: search, $options: 'i' } },
         { chapter: { $regex: search, $options: 'i' } },
         { topic: { $regex: search, $options: 'i' } },
-        { tags: { $in: [new RegExp(search, 'i')] } },
       ];
     }
 
-    const skip = (Number(page) - 1) * Number(limit);
-    const total = await Question.countDocuments(query);
-    const questions = await Question.find(query)
+    const questions = await Question.find(filter)
       .populate('createdBy', 'name email role')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(Number(limit));
+      .sort({ createdAt: -1 });
 
     res.status(200).json({
       success: true,
-      total,
-      page: Number(page),
-      pages: Math.ceil(total / Number(limit)),
+      count: questions.length,
       data: questions,
     });
   } catch (error) {
@@ -130,11 +179,33 @@ export const getQuestions = async (req, res, next) => {
   }
 };
 
-// @desc    Get Single Question by ID
-// @route   GET /api/questions/:id
+// ==========================================
+// 2. CREATE A SINGLE QUESTION
+// ==========================================
+export const createQuestion = async (req, res, next) => {
+  try {
+    const question = await Question.create({
+      ...req.body,
+      schoolId: req.user.schoolId || 'SCH-DEFAULT',
+      createdBy: req.user._id,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Question added to Question Bank',
+      data: question,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ==========================================
+// 3. GET SINGLE QUESTION
+// ==========================================
 export const getQuestionById = async (req, res, next) => {
   try {
-    const question = await Question.findById(req.params.id).populate('createdBy', 'name email role');
+    const question = await Question.findById(req.params.id);
     if (!question) {
       return res.status(404).json({ success: false, message: 'Question not found' });
     }
@@ -144,169 +215,143 @@ export const getQuestionById = async (req, res, next) => {
   }
 };
 
-// @desc    Update Question
-// @route   PUT /api/questions/:id
+// ==========================================
+// 4. UPDATE QUESTION
+// ==========================================
 export const updateQuestion = async (req, res, next) => {
   try {
-    const question = await Question.findById(req.params.id);
+    const question = await Question.findByIdAndUpdate(req.params.id, req.body, {
+      new: true,
+      runValidators: true,
+    });
     if (!question) {
       return res.status(404).json({ success: false, message: 'Question not found' });
     }
-
-    // Role-check: Only creator, Principal/Admin, or SuperAdmin can edit
-    if (
-      req.user.role === 'teacher' &&
-      question.createdBy.toString() !== req.user._id.toString()
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: 'You are only authorized to edit your own questions',
-      });
-    }
-
-    Object.assign(question, req.body);
-    await question.save();
-
-    res.status(200).json({
-      success: true,
-      message: 'Question updated successfully',
-      data: question,
-    });
+    res.status(200).json({ success: true, message: 'Question updated successfully', data: question });
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Delete / Archive Question
-// @route   DELETE /api/questions/:id
+// ==========================================
+// 5. ARCHIVE / DELETE QUESTION
+// ==========================================
 export const deleteQuestion = async (req, res, next) => {
   try {
-    const question = await Question.findById(req.params.id);
+    const question = await Question.findByIdAndUpdate(
+      req.params.id,
+      { isArchived: true, status: 'archived' },
+      { new: true }
+    );
     if (!question) {
       return res.status(404).json({ success: false, message: 'Question not found' });
     }
-
-    question.isArchived = true;
-    await question.save();
-
-    res.status(200).json({
-      success: true,
-      message: 'Question archived from Question Bank',
-    });
+    res.status(200).json({ success: true, message: 'Question archived from bank' });
   } catch (error) {
     next(error);
   }
 };
 
-// @desc    Bulk Import Questions (CSV / JSON payload)
-// @route   POST /api/questions/import
-export const importQuestions = async (req, res, next) => {
+// ==========================================
+// 6. DIRECT FILE BULK IMPORT (PDF, DOCX, XLSX, CSV)
+// ==========================================
+export const importQuestionsFromFile = async (req, res, next) => {
   try {
-    const { questions } = req.body;
-    if (!Array.isArray(questions) || questions.length === 0) {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Please upload a file (.pdf, .docx, .xlsx, .csv)' });
+    }
+
+    const { classGrade, subject } = req.body;
+    const fileBuffer = req.file.buffer;
+    const fileName = req.file.originalname.toLowerCase();
+    let questionsToInsert = [];
+
+    // CASE A: Excel (.xlsx / .xls) and CSV
+    if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls') || fileName.endsWith('.csv')) {
+      const workbook = xlsx.read(fileBuffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const sheetData = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+
+      const optMap = { A: 'opt_1', B: 'opt_2', C: 'opt_3', D: 'opt_4', '1': 'opt_1', '2': 'opt_2', '3': 'opt_3', '4': 'opt_4' };
+
+      questionsToInsert = sheetData
+        .map((row) => {
+          const options = [];
+          if (row.OptionA || row['Option A']) options.push({ id: 'opt_1', text: String(row.OptionA || row['Option A']) });
+          if (row.OptionB || row['Option B']) options.push({ id: 'opt_2', text: String(row.OptionB || row['Option B']) });
+          if (row.OptionC || row['Option C']) options.push({ id: 'opt_3', text: String(row.OptionC || row['Option C']) });
+          if (row.OptionD || row['Option D']) options.push({ id: 'opt_4', text: String(row.OptionD || row['Option D']) });
+
+          const rawAns = String(row.CorrectAnswer || row['Correct Answer'] || row.Answer || 'A').toUpperCase().trim();
+
+          return {
+            schoolId: req.user.schoolId || 'SCH-DEFAULT',
+            academicYear: '2025-2026',
+            classGrade: row.Class || row.classGrade || classGrade || 'Class 10',
+            subject: row.Subject || row.subject || subject || 'General',
+            chapter: row.Chapter || row.chapter || '',
+            topic: row.Topic || row.topic || '',
+            questionType: options.length > 0 ? (row.QuestionType || 'single_mcq') : (row.QuestionType || 'short_answer'),
+            difficulty: (row.Difficulty || 'medium').toLowerCase(),
+            marks: Number(row.Marks || row.marks) || 1,
+            negativeMarks: Number(row.NegativeMarks || row.negativeMarks) || 0,
+            questionText: String(row.QuestionText || row.Question || row.questionText || ''),
+            options: options.length > 0 ? options : [],
+            correctAnswer: options.length > 0 ? (optMap[rawAns] || 'opt_1') : (rawAns || 'N/A'),
+            explanation: String(row.Explanation || row.explanation || ''),
+            createdBy: req.user._id,
+            status: 'approved',
+          };
+        })
+        .filter((q) => q.questionText.trim().length > 0);
+    }
+
+    // CASE B: Word Document (.docx)
+    else if (fileName.endsWith('.docx')) {
+      const docxData = await mammoth.extractRawText({ buffer: fileBuffer });
+      const rawText = docxData.value || '';
+      const parsed = parseTextToQuestions(rawText, classGrade, subject);
+      questionsToInsert = parsed.map((q) => ({
+        ...q,
+        schoolId: req.user.schoolId || 'SCH-DEFAULT',
+        academicYear: '2025-2026',
+        createdBy: req.user._id,
+        status: 'approved',
+      }));
+    }
+
+    // CASE C: PDF Document (.pdf)
+    else if (fileName.endsWith('.pdf')) {
+      const rawText = await extractPdfText(fileBuffer);
+      const parsed = parseTextToQuestions(rawText, classGrade, subject);
+      questionsToInsert = parsed.map((q) => ({
+        ...q,
+        schoolId: req.user.schoolId || 'SCH-DEFAULT',
+        academicYear: '2025-2026',
+        createdBy: req.user._id,
+        status: 'approved',
+      }));
+    } else {
       return res.status(400).json({
         success: false,
-        message: 'Please provide an array of questions to import',
+        message: 'Unsupported format. Please upload .pdf, .docx, .xlsx, or .csv',
       });
     }
 
-    const formatted = questions.map((q) => ({
-      schoolId: req.user.schoolId || 'SCH-DEFAULT',
-      academicYear: q.academicYear || '2025-2026',
-      classGrade: q.classGrade,
-      subject: q.subject,
-      chapter: q.chapter || '',
-      topic: q.topic || '',
-      questionType: q.questionType || 'single_mcq',
-      difficulty: q.difficulty || 'medium',
-      marks: Number(q.marks) || 1,
-      negativeMarks: Number(q.negativeMarks) || 0,
-      questionText: q.questionText,
-      instructionText: q.instructionText || '',
-      passageText: q.passageText || '',
-      imageUrl: q.imageUrl || '',
-      options: Array.isArray(q.options) ? q.options : [],
-      matchPairs: Array.isArray(q.matchPairs) ? q.matchPairs : [],
-      correctAnswer: q.correctAnswer,
-      numericalTolerance: Number(q.numericalTolerance) || 0,
-      explanation: q.explanation || '',
-      tags: Array.isArray(q.tags) ? q.tags : typeof q.tags === 'string' ? q.tags.split(',') : [],
-      createdBy: req.user._id,
-      status: 'approved',
-    }));
+    if (questionsToInsert.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No valid questions could be extracted. Please ensure questions are numbered (e.g. 1. Question stem, A) Option, Ans: A).',
+      });
+    }
 
-    const inserted = await Question.insertMany(formatted);
+    const inserted = await Question.insertMany(questionsToInsert);
 
     res.status(201).json({
       success: true,
-      message: `Successfully imported ${inserted.length} questions into Question Bank`,
+      message: `Successfully imported ${inserted.length} question(s) into the Bank!`,
       count: inserted.length,
       data: inserted,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-// @desc    Auto-Select Blueprint Questions
-// @route   POST /api/questions/blueprint-generate
-export const generateBlueprintQuestions = async (req, res, next) => {
-  try {
-    const {
-      classGrade,
-      subject,
-      totalQuestions = 10,
-      easyPercentage = 20,
-      mediumPercentage = 50,
-      hardPercentage = 30,
-      preferredTypes = [],
-    } = req.body;
-
-    const easyCount = Math.round((totalQuestions * easyPercentage) / 100);
-    const mediumCount = Math.round((totalQuestions * mediumPercentage) / 100);
-    const hardCount = totalQuestions - easyCount - mediumCount;
-
-    const baseFilter = {
-      classGrade,
-      subject,
-      isArchived: { $ne: true },
-      status: 'approved',
-    };
-
-    if (preferredTypes.length > 0) {
-      baseFilter.questionType = { $in: preferredTypes };
-    }
-
-    // Fetch questions by difficulty
-    const [easyQs, medQs, hardQs] = await Promise.all([
-      Question.find({ ...baseFilter, difficulty: 'easy' }).limit(easyCount + 10),
-      Question.find({ ...baseFilter, difficulty: 'medium' }).limit(mediumCount + 10),
-      Question.find({ ...baseFilter, difficulty: 'hard' }).limit(hardCount + 10),
-    ]);
-
-    const selected = [
-      ...easyQs.slice(0, easyCount),
-      ...medQs.slice(0, mediumCount),
-      ...hardQs.slice(0, hardCount),
-    ];
-
-    if (selected.length < totalQuestions) {
-      // Backfill from any difficulty if specific counts are not fully matched
-      const existingIds = selected.map((q) => q._id);
-      const remainingNeeded = totalQuestions - selected.length;
-      const extraQs = await Question.find({
-        ...baseFilter,
-        _id: { $nin: existingIds },
-      }).limit(remainingNeeded);
-      selected.push(...extraQs);
-    }
-
-    res.status(200).json({
-      success: true,
-      requestedCount: totalQuestions,
-      generatedCount: selected.length,
-      isSufficient: selected.length >= totalQuestions,
-      data: selected,
     });
   } catch (error) {
     next(error);

@@ -1,6 +1,7 @@
 import AcademicStructure from '../models/academicModel.js';
 
 const DEFAULT_CLASSES = [
+  { name: 'Nursery', code: 'NUR', level: 'pre_primary', sections: ['A', 'B'], subjects: ['Rhymes & Story', 'Numbers', 'General Awareness', 'Art & Craft'] },
   { name: 'LKG', code: 'LKG', level: 'pre_primary', sections: ['A', 'B'], subjects: ['English', 'Rhymes & Story', 'Numbers', 'General Awareness', 'Art & Craft'] },
   { name: 'UKG', code: 'UKG', level: 'pre_primary', sections: ['A', 'B'], subjects: ['English', 'Mathematics', 'General Awareness', 'Hindi', 'Drawing'] },
   { name: 'Class 1', code: 'C01', level: 'primary', sections: ['A', 'B', 'C'], subjects: ['English', 'Mathematics', 'Environmental Studies', 'Hindi', 'Computer Science'] },

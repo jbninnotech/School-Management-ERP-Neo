@@ -1,26 +1,37 @@
 import { Router } from 'express';
+import multer from 'multer';
 import {
-  createQuestion,
   getQuestions,
   getQuestionById,
+  createQuestion,
   updateQuestion,
   deleteQuestion,
-  importQuestions,
-  generateBlueprintQuestions,
+  importQuestionsFromFile,
 } from '../controllers/questionController.js';
 import { protect, authorize } from '../middlewares/authMiddleware.js';
 
+// Configure multer memory storage
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB limit
+});
+
 const router = Router();
 
-// Question Bank access (SuperAdmin, Admin, Teacher)
-router.get('/', protect, authorize('superadmin', 'admin', 'teacher'), getQuestions);
-router.get('/:id', protect, authorize('superadmin', 'admin', 'teacher'), getQuestionById);
+// General CRUD
+router.get('/', protect, getQuestions);
+router.get('/:id', protect, getQuestionById);
 router.post('/', protect, authorize('superadmin', 'admin', 'teacher'), createQuestion);
 router.put('/:id', protect, authorize('superadmin', 'admin', 'teacher'), updateQuestion);
 router.delete('/:id', protect, authorize('superadmin', 'admin', 'teacher'), deleteQuestion);
 
-// Bulk Import & Blueprint Generator
-router.post('/import', protect, authorize('superadmin', 'admin', 'teacher'), importQuestions);
-router.post('/blueprint-generate', protect, authorize('superadmin', 'admin', 'teacher'), generateBlueprintQuestions);
+// Bulk Upload Endpoint (PDF, Word, Excel, CSV)
+router.post(
+  '/import',
+  protect,
+  authorize('superadmin', 'admin', 'teacher'),
+  upload.single('file'),
+  importQuestionsFromFile
+);
 
 export default router;

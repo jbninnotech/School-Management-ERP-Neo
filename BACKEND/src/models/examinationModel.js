@@ -121,9 +121,11 @@ const examinationSchema = new mongoose.Schema(
         'approved',
         'rejected',
         'scheduled',
+        'published',
         'in_progress',
         'completed',
         'results_published',
+        'cancelled',
       ],
       default: 'draft',
       index: true,
@@ -142,6 +144,24 @@ const examinationSchema = new mongoose.Schema(
     version: {
       type: Number,
       default: 1,
+    },
+    paperVersionId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'PaperVersion',
+      index: true,
+    },
+    templateId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'AssessmentTemplate',
+    },
+    gradeBand: {
+      type: String,
+      enum: ['early_years', 'primary', 'middle', 'secondary', 'senior_secondary'],
+      default: 'secondary',
+    },
+    revision: {
+      type: Number,
+      default: 1, // Optimistic concurrency revision counter
     },
     isSnapshotLocked: {
       type: Boolean,

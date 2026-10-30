@@ -143,6 +143,25 @@ export default function StudentExamInterface() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [exam, attempt]);
 
+  // 4. Background Heartbeat Ping (Every 15s to maintain live status)
+  useEffect(() => {
+    if (!attempt || attempt.status !== 'in_progress') return;
+
+    const heartbeatInterval = setInterval(async () => {
+      try {
+        const res = await API.post(`/exams/attempts/${attempt._id}/heartbeat`);
+        if (res.data?.timeRemainingSeconds !== undefined) {
+          // Re-sync client timer with authoritative server deadline
+          setSecondsRemaining(res.data.timeRemainingSeconds);
+        }
+      } catch (err) {
+        console.warn('Heartbeat ping failed:', err.message);
+      }
+    }, 15000);
+
+    return () => clearInterval(heartbeatInterval);
+  }, [attempt]);
+
   // Mark current question as visited
   const currentQ = questions[currentQIndex];
   const currentQId = currentQ ? (currentQ.questionId ? currentQ.questionId.toString() : currentQ._id.toString()) : null;
@@ -156,21 +175,37 @@ export default function StudentExamInterface() {
     }
   }, [currentQIndex, currentQId]);
 
-  // Save current answer to backend
+  // Save current answer incrementally to dedicated AttemptAnswer backend
+  const seqRef = useRef(1);
   const saveAnswerToBackend = async (qId, answerData) => {
     if (!attempt) return;
     setSavingStatus('saving');
+    seqRef.current += 1;
     try {
-      await API.post('/exams/save-answer', {
-        attemptId: attempt._id,
-        questionId: qId,
-        studentAnswer: answerData.studentAnswer,
+      await API.put(`/exams/attempts/${attempt._id}/answers/${qId}`, {
+        answer: answerData.studentAnswer,
+        clientSeq: seqRef.current,
+        clientTimestamp: new Date(),
         isMarkedForReview: answerData.isMarkedForReview,
         visited: true,
+        sectionId: currentQ?.sectionId || 'sec_1',
+        questionType: currentQ?.questionType || 'single_mcq',
       });
       setSavingStatus('saved');
     } catch (err) {
-      setSavingStatus('error');
+      // Fallback to old save endpoint if needed
+      try {
+        await API.post('/exams/save-answer', {
+          attemptId: attempt._id,
+          questionId: qId,
+          studentAnswer: answerData.studentAnswer,
+          isMarkedForReview: answerData.isMarkedForReview,
+          visited: true,
+        });
+        setSavingStatus('saved');
+      } catch (e) {
+        setSavingStatus('error');
+      }
     }
   };
 

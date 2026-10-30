@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../../components/Sidebar.jsx';
 import API from '../../api/api.js';
@@ -12,7 +12,9 @@ import {
   CheckCircle2,
   AlertCircle,
   HelpCircle,
-  Sliders
+  Calendar,
+  Sparkles,
+  Info
 } from 'lucide-react';
 
 export default function CreateExamWizard() {
@@ -52,7 +54,7 @@ export default function CreateExamWizard() {
     partialMarkingEnabled: true,
     evaluationMethod: 'hybrid',
 
-    // Step 4: Rules & Competitive Engine
+    // Step 4: Rules & Controls
     questionNavigation: 'free',
     allowPreviousNavigation: true,
     randomizeQuestionOrder: false,
@@ -66,6 +68,13 @@ export default function CreateExamWizard() {
     isPracticeMode: false,
     tabSwitchLimit: 3,
   });
+
+  const stepsMeta = [
+    { num: 1, label: 'Basic Info', icon: <FileText size={18} /> },
+    { num: 2, label: 'Schedule', icon: <Clock size={18} /> },
+    { num: 3, label: 'Scoring', icon: <Award size={18} /> },
+    { num: 4, label: 'Security & Rules', icon: <Shield size={18} /> },
+  ];
 
   const availableSections = ['A', 'B', 'C', 'D', 'Science', 'Commerce', 'Humanities'];
 
@@ -98,7 +107,21 @@ export default function CreateExamWizard() {
       }
     }
     if (currentStep === 2) {
-      if (formData.durationMinutes <= 0) {
+      if (!formData.examDate) {
+        setErrorMsg('Please select an examination date');
+        return false;
+      }
+      if (!formData.startTime || !formData.endTime) {
+        setErrorMsg('Please specify both start time and end time');
+        return false;
+      }
+      const startDateTime = new Date(`${formData.examDate}T${formData.startTime}:00`);
+      const endDateTime = new Date(`${formData.examDate}T${formData.endTime}:00`);
+      if (endDateTime <= startDateTime) {
+        setErrorMsg('Examination end time must be later than start time');
+        return false;
+      }
+      if (Number(formData.durationMinutes) <= 0) {
         setErrorMsg('Duration must be greater than 0 minutes');
         return false;
       }
@@ -119,12 +142,14 @@ export default function CreateExamWizard() {
   const handleNext = () => {
     if (validateStep()) {
       setCurrentStep((prev) => Math.min(prev + 1, 4));
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
 
   const handleBack = () => {
     setErrorMsg('');
     setCurrentStep((prev) => Math.max(prev - 1, 1));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleSubmit = async () => {
@@ -133,7 +158,6 @@ export default function CreateExamWizard() {
     setErrorMsg('');
 
     try {
-      // Calculate start and end ISO timestamps
       const startDateTime = new Date(`${formData.examDate}T${formData.startTime}:00`);
       const endDateTime = new Date(`${formData.examDate}T${formData.endTime}:00`);
 
@@ -152,7 +176,6 @@ export default function CreateExamWizard() {
       const res = await API.post('/exams', payload);
       if (res.data?.success) {
         const createdExam = res.data.data;
-        // Redirect to Question Paper Builder
         navigate(`/exams/${createdExam._id}/builder`);
       }
     } catch (err) {
@@ -163,70 +186,194 @@ export default function CreateExamWizard() {
   };
 
   return (
-    <div style={{ backgroundColor: '#f8fafc', minHeight: '100vh' }}>
+    <div style={{ backgroundColor: '#f8fafc', minHeight: '100vh', width: '100%' }}>
+      {/* Responsive Inline CSS */}
+      <style>{`
+        .wizard-container {
+          margin-left: 260px;
+          padding: 24px 32px;
+          transition: margin 0.25s ease-in-out;
+        }
+        @media (max-width: 991.98px) {
+          .wizard-container {
+            margin-left: 0 !important;
+            padding: 16px 14px 80px 14px !important;
+          }
+        }
+        .form-check-card {
+          border: 1px solid #e2e8f0;
+          background: #ffffff;
+          border-radius: 12px;
+          padding: 14px 16px;
+          transition: all 0.15s ease-in-out;
+          cursor: pointer;
+        }
+        .form-check-card:hover {
+          border-color: #93c5fd;
+          background-color: #f8fafc;
+        }
+        .interactive-label {
+          cursor: pointer;
+          user-select: none;
+        }
+      `}</style>
+
       <Sidebar user={currentUser} />
-      <main style={{ marginLeft: '260px', padding: '28px 36px' }}>
 
-        {/* Header */}
-        <div className="mb-4 pb-3 border-bottom">
-          <h3 className="fw-bold mb-1 text-dark">Examination Creation Wizard</h3>
-          <p className="text-muted small mb-0">
-            Configure examination blueprint, schedules, competitive rules, and marking criteria
-          </p>
-        </div>
-
-        {/* Stepper Progress */}
-        <div className="card border-0 shadow-sm rounded-4 p-3 mb-4 bg-white">
-          <div className="row g-2 text-center">
-            <div className={`col-3 p-2 rounded-3 ${currentStep === 1 ? 'bg-primary-subtle text-primary fw-bold' : currentStep > 1 ? 'text-success fw-semibold' : 'text-muted'}`}>
-              <FileText size={18} className="d-block mx-auto mb-1" />
-              <span className="small">1. Basic Information</span>
+      <main className="wizard-container">
+        {/* Header Bar */}
+        <div
+          className="rounded-4 p-3 p-md-4 mb-4"
+          style={{
+            backgroundColor: '#ffffff',
+            border: '1px solid #e2e8f0',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.03)'
+          }}
+        >
+          <div className="d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div>
+              <div className="d-flex align-items-center gap-2 mb-1">
+                <span
+                  style={{
+                    backgroundColor: '#eff6ff',
+                    color: '#2563eb',
+                    padding: '6px',
+                    borderRadius: '8px',
+                    display: 'inline-flex'
+                  }}
+                >
+                  <Sparkles size={20} />
+                </span>
+                <h4 className="fw-bold text-dark mb-0 fs-5 fs-md-4">
+                  Create Question Paper Blueprint
+                </h4>
+              </div>
+              <p className="text-secondary small mb-0">
+                Setup syllabus, examination timing, scoring rubric, and anti-cheating controls
+              </p>
             </div>
-            <div className={`col-3 p-2 rounded-3 ${currentStep === 2 ? 'bg-primary-subtle text-primary fw-bold' : currentStep > 2 ? 'text-success fw-semibold' : 'text-muted'}`}>
-              <Clock size={18} className="d-block mx-auto mb-1" />
-              <span className="small">2. Schedule & Timing</span>
-            </div>
-            <div className={`col-3 p-2 rounded-3 ${currentStep === 3 ? 'bg-primary-subtle text-primary fw-bold' : currentStep > 3 ? 'text-success fw-semibold' : 'text-muted'}`}>
-              <Award size={18} className="d-block mx-auto mb-1" />
-              <span className="small">3. Marks & Evaluation</span>
-            </div>
-            <div className={`col-3 p-2 rounded-3 ${currentStep === 4 ? 'bg-primary-subtle text-primary fw-bold' : 'text-muted'}`}>
-              <Shield size={18} className="d-block mx-auto mb-1" />
-              <span className="small">4. Rules & Controls</span>
-            </div>
+            <span className="badge bg-primary-subtle text-primary fw-semibold px-3 py-2 rounded-pill">
+              Step {currentStep} of 4
+            </span>
           </div>
         </div>
 
+        {/* Desktop Stepper Bar */}
+        <div
+          className="d-none d-md-flex align-items-center justify-content-between p-3 rounded-4 mb-4 bg-white border"
+          style={{ borderColor: '#e2e8f0' }}
+        >
+          {stepsMeta.map((s, idx) => {
+            const isActive = currentStep === s.num;
+            const isCompleted = currentStep > s.num;
+            return (
+              <React.Fragment key={s.num}>
+                <div
+                  className="d-flex align-items-center gap-2"
+                  style={{
+                    color: isActive ? '#2563eb' : isCompleted ? '#16a34a' : '#64748b',
+                    fontWeight: isActive || isCompleted ? 600 : 500,
+                    fontSize: '0.9rem'
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '34px',
+                      height: '34px',
+                      borderRadius: '50%',
+                      backgroundColor: isActive ? '#eff6ff' : isCompleted ? '#dcfce7' : '#f1f5f9',
+                      color: isActive ? '#2563eb' : isCompleted ? '#16a34a' : '#64748b',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      border: isActive ? '2px solid #2563eb' : 'none'
+                    }}
+                  >
+                    {isCompleted ? <CheckCircle2 size={18} /> : s.icon}
+                  </div>
+                  <span>{s.num}. {s.label}</span>
+                </div>
+                {idx < stepsMeta.length - 1 && (
+                  <div
+                    style={{
+                      flex: 1,
+                      height: '2px',
+                      backgroundColor: isCompleted ? '#22c55e' : '#e2e8f0',
+                      margin: '0 12px'
+                    }}
+                  />
+                )}
+              </React.Fragment>
+            );
+          })}
+        </div>
+
+        {/* Mobile Stepper Bar */}
+        <div className="d-block d-md-none mb-3">
+          <div className="d-flex justify-content-between align-items-center mb-1">
+            <span className="fw-bold text-dark small">
+              {stepsMeta[currentStep - 1].num}. {stepsMeta[currentStep - 1].label}
+            </span>
+            <span className="text-muted small">Step {currentStep} / 4</span>
+          </div>
+          <div className="progress" style={{ height: '6px' }}>
+            <div
+              className="progress-bar"
+              role="progressbar"
+              style={{
+                width: `${(currentStep / 4) * 100}%`,
+                backgroundColor: '#2563eb',
+                transition: 'width 0.3s ease'
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Error Alert */}
         {errorMsg && (
-          <div className="alert alert-danger border-0 rounded-3 mb-4 d-flex align-items-center gap-2">
-            <AlertCircle size={18} />
-            <div>{errorMsg}</div>
+          <div className="alert alert-danger border-0 rounded-3 mb-4 d-flex align-items-center gap-2 p-3 shadow-sm">
+            <AlertCircle size={20} className="flex-shrink-0" />
+            <div className="small fw-semibold">{errorMsg}</div>
           </div>
         )}
 
-        {/* Step Card Content */}
-        <div className="card border-0 shadow-sm rounded-4 bg-white p-4 p-md-5 mb-4">
-
-          {/* STEP 1: BASIC INFORMATION */}
+        {/* Main Step Card */}
+        <div
+          className="rounded-4 bg-white p-3 p-md-4 mb-4 border"
+          style={{ borderColor: '#e2e8f0', boxShadow: '0 1px 3px rgba(0,0,0,0.03)' }}
+        >
+          {/* ================= STEP 1: BASIC INFORMATION ================= */}
           {currentStep === 1 && (
             <div>
-              <h5 className="fw-bold text-dark mb-4">Step 1: Basic Examination Details</h5>
+              <div className="border-bottom pb-3 mb-4">
+                <h5 className="fw-bold text-dark mb-1">General Examination Info</h5>
+                <p className="text-secondary small mb-0">Specify test name, class syllabus, and recipient sections</p>
+              </div>
+
               <div className="row g-3">
-                <div className="col-md-8">
-                  <label className="form-label small fw-semibold text-secondary">Examination Title *</label>
+                <div className="col-12 col-md-8">
+                  <label className="form-label small fw-semibold text-secondary">
+                    Examination Title <span className="text-danger">*</span>
+                  </label>
                   <input
                     type="text"
                     name="title"
-                    className="form-control"
-                    placeholder="e.g. CBSE Term-1 Summative Assessment in Mathematics"
+                    className="form-control py-2"
+                    placeholder="e.g. CBSE Term-1 Summative Assessment"
                     value={formData.title}
                     onChange={handleTextChange}
                     required
                   />
                 </div>
-                <div className="col-md-4">
+
+                <div className="col-12 col-md-4">
                   <label className="form-label small fw-semibold text-secondary">Category *</label>
-                  <select name="category" className="form-select" value={formData.category} onChange={handleTextChange}>
+                  <select
+                    name="category"
+                    className="form-select py-2"
+                    value={formData.category}
+                    onChange={handleTextChange}
+                  >
                     <option value="unit_test">Unit Test</option>
                     <option value="mid_term">Mid-Term Examination</option>
                     <option value="final">Annual / Final Examination</option>
@@ -236,19 +383,15 @@ export default function CreateExamWizard() {
                   </select>
                 </div>
 
-                <div className="col-md-4">
-                  <label className="form-label small fw-semibold text-secondary">Academic Year</label>
-                  <input
-                    type="text"
-                    name="academicYear"
-                    className="form-control"
-                    value={formData.academicYear}
-                    onChange={handleTextChange}
-                  />
-                </div>
-                <div className="col-md-4">
+                <div className="col-12 col-md-4">
                   <label className="form-label small fw-semibold text-secondary">Class / Grade *</label>
-                  <select name="classGrade" className="form-select" value={formData.classGrade} onChange={handleTextChange}>
+                  <select
+                    name="classGrade"
+                    className="form-select py-2"
+                    value={formData.classGrade}
+                    onChange={handleTextChange}
+                  >
+                    <option value="Nursery">Nursery</option>
                     <option value="LKG">LKG</option>
                     <option value="UKG">UKG</option>
                     {Array.from({ length: 12 }, (_, i) => `Class ${i + 1}`).map((cls) => (
@@ -256,12 +399,13 @@ export default function CreateExamWizard() {
                     ))}
                   </select>
                 </div>
-                <div className="col-md-4">
+
+                <div className="col-12 col-md-4">
                   <label className="form-label small fw-semibold text-secondary">Subject *</label>
                   <input
                     type="text"
                     name="subject"
-                    className="form-control"
+                    className="form-control py-2"
                     placeholder="e.g. Mathematics Standard"
                     value={formData.subject}
                     onChange={handleTextChange}
@@ -269,9 +413,23 @@ export default function CreateExamWizard() {
                   />
                 </div>
 
-                {/* Multi-Section Selection */}
+                <div className="col-12 col-md-4">
+                  <label className="form-label small fw-semibold text-secondary">Academic Session</label>
+                  <input
+                    type="text"
+                    name="academicYear"
+                    className="form-control py-2"
+                    value={formData.academicYear}
+                    onChange={handleTextChange}
+                  />
+                </div>
+
+                {/* Section Multi-Select Pills */}
                 <div className="col-12">
-                  <label className="form-label small fw-semibold text-secondary">Eligible Sections (Select all that apply) *</label>
+                  <label className="form-label small fw-semibold text-secondary d-flex align-items-center gap-1">
+                    <span>Assign to Sections *</span>
+                    <span className="text-muted" style={{ fontSize: '0.75rem' }}>(Tap to toggle)</span>
+                  </label>
                   <div className="d-flex flex-wrap gap-2">
                     {availableSections.map((sec) => {
                       const selected = formData.sections.includes(sec);
@@ -279,10 +437,17 @@ export default function CreateExamWizard() {
                         <button
                           key={sec}
                           type="button"
-                          className={`btn btn-sm px-3 py-1 rounded-pill ${selected ? 'btn-primary' : 'btn-outline-secondary'}`}
+                          className="btn btn-sm px-3 py-2 rounded-pill fw-semibold"
+                          style={{
+                            backgroundColor: selected ? '#2563eb' : '#f1f5f9',
+                            color: selected ? '#ffffff' : '#334155',
+                            border: selected ? '1px solid #2563eb' : '1px solid #cbd5e1',
+                            minHeight: '38px',
+                            transition: 'all 0.15s ease'
+                          }}
                           onClick={() => handleSectionToggle(sec)}
                         >
-                          Section {sec}
+                          {selected ? `✓ Sec ${sec}` : `+ Sec ${sec}`}
                         </button>
                       );
                     })}
@@ -290,7 +455,7 @@ export default function CreateExamWizard() {
                 </div>
 
                 <div className="col-12">
-                  <label className="form-label small fw-semibold text-secondary">Description / Scope</label>
+                  <label className="form-label small fw-semibold text-secondary">Description / Syllabus Covered</label>
                   <textarea
                     name="description"
                     rows="2"
@@ -315,155 +480,200 @@ export default function CreateExamWizard() {
             </div>
           )}
 
-          {/* STEP 2: SCHEDULE & TIMING */}
+          {/* ================= STEP 2: SCHEDULE & TIMING ================= */}
           {currentStep === 2 && (
             <div>
-              <h5 className="fw-bold text-dark mb-4">Step 2: Examination Schedule & Window</h5>
+              <div className="border-bottom pb-3 mb-4">
+                <h5 className="fw-bold text-dark mb-1">Exam Window & Time Limits</h5>
+                <p className="text-secondary small mb-0">Set the test date, allowed time window, and auto-submission rules</p>
+              </div>
+
               <div className="row g-3">
-                <div className="col-md-4">
+                <div className="col-12 col-md-4">
                   <label className="form-label small fw-semibold text-secondary">Examination Date *</label>
                   <input
                     type="date"
                     name="examDate"
-                    className="form-control"
+                    className="form-control py-2"
                     value={formData.examDate}
                     onChange={handleTextChange}
                     required
                   />
                 </div>
-                <div className="col-md-4">
-                  <label className="form-label small fw-semibold text-secondary">Window Start Time *</label>
+
+                <div className="col-6 col-md-4">
+                  <label className="form-label small fw-semibold text-secondary">Start Time *</label>
                   <input
                     type="time"
                     name="startTime"
-                    className="form-control"
+                    className="form-control py-2"
                     value={formData.startTime}
                     onChange={handleTextChange}
                     required
                   />
                 </div>
-                <div className="col-md-4">
-                  <label className="form-label small fw-semibold text-secondary">Window End Time *</label>
+
+                <div className="col-6 col-md-4">
+                  <label className="form-label small fw-semibold text-secondary">End Time *</label>
                   <input
                     type="time"
                     name="endTime"
-                    className="form-control"
+                    className="form-control py-2"
                     value={formData.endTime}
                     onChange={handleTextChange}
                     required
                   />
                 </div>
 
-                <div className="col-md-6">
-                  <label className="form-label small fw-semibold text-secondary">Exam Duration (Minutes) *</label>
-                  <input
-                    type="number"
-                    name="durationMinutes"
-                    className="form-control"
-                    min="5"
-                    max="360"
-                    value={formData.durationMinutes}
-                    onChange={handleTextChange}
-                    required
-                  />
-                  <small className="text-muted">Student countdown timer will be locked to this exact duration.</small>
-                </div>
-
-                <div className="col-md-6">
-                  <label className="form-label small fw-semibold text-secondary">Late-Start Policy</label>
-                  <select name="lateStartPolicy" className="form-select" value={formData.lateStartPolicy} onChange={handleTextChange}>
-                    <option value="allow_with_reduced_time">Allow with reduced time (Strict hard stop at end window)</option>
-                    <option value="allow_with_full_time">Allow with full duration within window</option>
-                    <option value="disallow_after_15_mins">Disallow entry 15 mins after scheduled start</option>
-                  </select>
-                </div>
-
-                <div className="col-md-6">
-                  <label className="form-label small fw-semibold text-secondary">Result Publication Setting</label>
-                  <select name="resultPublicationMode" className="form-select" value={formData.resultPublicationMode} onChange={handleTextChange}>
-                    <option value="manual">Manual Publication (Authorized Principal / Teacher approval required)</option>
-                    <option value="immediate">Immediate Scorecard (Released as soon as student submits)</option>
-                  </select>
-                </div>
-
-                <div className="col-md-6 d-flex align-items-center mt-4">
-                  <div className="form-check form-switch">
+                <div className="col-12 col-md-6">
+                  <label className="form-label small fw-semibold text-secondary">Duration (in Minutes) *</label>
+                  <div className="input-group">
                     <input
-                      className="form-check-input"
-                      type="checkbox"
-                      id="autoSubmitAtDeadline"
-                      name="autoSubmitAtDeadline"
-                      checked={formData.autoSubmitAtDeadline}
+                      type="number"
+                      name="durationMinutes"
+                      className="form-control py-2"
+                      min="5"
+                      max="360"
+                      value={formData.durationMinutes}
                       onChange={handleTextChange}
+                      required
                     />
-                    <label className="form-check-label small fw-semibold text-secondary" htmlFor="autoSubmitAtDeadline">
-                      Automatically Submit Answers at Deadline Expiration
-                    </label>
+                    <span className="input-group-text bg-light text-muted">Mins</span>
+                  </div>
+                  <span className="text-muted" style={{ fontSize: '0.75rem' }}>
+                    Candidate's countdown timer will start upon clicking 'Start Test'.
+                  </span>
+                </div>
+
+                <div className="col-12 col-md-6">
+                  <label className="form-label small fw-semibold text-secondary">Late-Entry Policy</label>
+                  <select
+                    name="lateStartPolicy"
+                    className="form-select py-2"
+                    value={formData.lateStartPolicy}
+                    onChange={handleTextChange}
+                  >
+                    <option value="allow_with_reduced_time">Allow with reduced time (Hard stop at Window End)</option>
+                    <option value="allow_with_full_time">Allow full duration anytime within window</option>
+                    <option value="disallow_after_15_mins">Strict: Block entry after 15 mins</option>
+                  </select>
+                </div>
+
+                <div className="col-12 col-md-6">
+                  <label className="form-label small fw-semibold text-secondary">Result Release Setting</label>
+                  <select
+                    name="resultPublicationMode"
+                    className="form-select py-2"
+                    value={formData.resultPublicationMode}
+                    onChange={handleTextChange}
+                  >
+                    <option value="manual">Manual Publication (Teacher/Admin Approval Required)</option>
+                    <option value="immediate">Immediate Scorecard (Published upon submission)</option>
+                  </select>
+                </div>
+
+                <div className="col-12 col-md-6">
+                  <div className="form-check-card h-100 d-flex align-items-center">
+                    <div className="form-check form-switch mb-0">
+                      <input
+                        className="form-check-input ms-0 me-3"
+                        type="checkbox"
+                        id="autoSubmitAtDeadline"
+                        name="autoSubmitAtDeadline"
+                        checked={formData.autoSubmitAtDeadline}
+                        onChange={handleTextChange}
+                        style={{ cursor: 'pointer' }}
+                      />
+                      <label
+                        className="form-check-label small fw-semibold text-dark interactive-label"
+                        htmlFor="autoSubmitAtDeadline"
+                      >
+                        Auto-Submit when Countdown Timer Hits 00:00
+                      </label>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* STEP 3: MARKS & EVALUATION */}
+          {/* ================= STEP 3: MARKS & EVALUATION ================= */}
           {currentStep === 3 && (
             <div>
-              <h5 className="fw-bold text-dark mb-4">Step 3: Marks & Scoring Architecture</h5>
+              <div className="border-bottom pb-3 mb-4">
+                <h5 className="fw-bold text-dark mb-1">Marks & Scoring Architecture</h5>
+                <p className="text-secondary small mb-0">Define maximum scores, pass thresholds, and negative marking rules</p>
+              </div>
+
               <div className="row g-3">
-                <div className="col-md-4">
-                  <label className="form-label small fw-semibold text-secondary">Total Maximum Marks *</label>
+                <div className="col-6 col-md-4">
+                  <label className="form-label small fw-semibold text-secondary">Maximum Marks *</label>
                   <input
                     type="number"
                     name="totalMarks"
-                    className="form-control fw-bold"
+                    className="form-control py-2 fw-bold text-primary"
                     value={formData.totalMarks}
                     onChange={handleTextChange}
                     required
                   />
                 </div>
-                <div className="col-md-4">
+
+                <div className="col-6 col-md-4">
                   <label className="form-label small fw-semibold text-secondary">Passing Marks *</label>
                   <input
                     type="number"
                     name="passingMarks"
-                    className="form-control"
+                    className="form-control py-2"
                     value={formData.passingMarks}
                     onChange={handleTextChange}
                     required
                   />
                 </div>
-                <div className="col-md-4">
+
+                <div className="col-12 col-md-4">
                   <label className="form-label small fw-semibold text-secondary">Evaluation Mode</label>
-                  <select name="evaluationMethod" className="form-select" value={formData.evaluationMethod} onChange={handleTextChange}>
-                    <option value="hybrid">Hybrid (Auto-evaluate MCQs + Teacher eval for Subjective)</option>
-                    <option value="automatic">100% Automatic (Objective exams only)</option>
-                    <option value="manual">Full Manual Evaluation</option>
+                  <select
+                    name="evaluationMethod"
+                    className="form-select py-2"
+                    value={formData.evaluationMethod}
+                    onChange={handleTextChange}
+                  >
+                    <option value="hybrid">Hybrid (Auto MCQs + Teacher Subjective)</option>
+                    <option value="automatic">100% Automated (MCQ / Objective only)</option>
+                    <option value="manual">Full Manual Teacher Grading</option>
                   </select>
                 </div>
 
-                <div className="col-md-6 mt-3">
-                  <div className="card p-3 border rounded-3 bg-light">
+                {/* Negative Marking Card */}
+                <div className="col-12 col-md-6">
+                  <div className="form-check-card h-100">
                     <div className="form-check form-switch mb-2">
                       <input
-                        className="form-check-input"
+                        className="form-check-input ms-0 me-3"
                         type="checkbox"
                         id="negativeMarkingEnabled"
                         name="negativeMarkingEnabled"
                         checked={formData.negativeMarkingEnabled}
                         onChange={handleTextChange}
+                        style={{ cursor: 'pointer' }}
                       />
-                      <label className="form-check-label fw-semibold text-dark small" htmlFor="negativeMarkingEnabled">
-                        Enable Competitive Negative Marking
+                      <label
+                        className="form-check-label fw-semibold text-dark small interactive-label"
+                        htmlFor="negativeMarkingEnabled"
+                      >
+                        Enable Negative Marking (Competitive standard)
                       </label>
                     </div>
+
                     {formData.negativeMarkingEnabled && (
-                      <div className="mt-2">
-                        <label className="form-label small text-secondary">Default Deduction per Wrong Answer</label>
+                      <div className="mt-3 ps-4">
+                        <label className="form-label small text-secondary">Deduction per incorrect answer</label>
                         <input
                           type="number"
                           step="0.25"
                           name="defaultNegativeMarks"
                           className="form-control form-control-sm"
+                          style={{ maxWidth: '140px' }}
                           value={formData.defaultNegativeMarks}
                           onChange={handleTextChange}
                         />
@@ -472,196 +682,231 @@ export default function CreateExamWizard() {
                   </div>
                 </div>
 
-                <div className="col-md-6 mt-3">
-                  <div className="card p-3 border rounded-3 bg-light">
+                {/* Partial Marking Card */}
+                <div className="col-12 col-md-6">
+                  <div className="form-check-card h-100">
                     <div className="form-check form-switch mb-2">
                       <input
-                        className="form-check-input"
+                        className="form-check-input ms-0 me-3"
                         type="checkbox"
                         id="partialMarkingEnabled"
                         name="partialMarkingEnabled"
                         checked={formData.partialMarkingEnabled}
                         onChange={handleTextChange}
+                        style={{ cursor: 'pointer' }}
                       />
-                      <label className="form-check-label fw-semibold text-dark small" htmlFor="partialMarkingEnabled">
-                        Enable Partial Marking for Multiple Select & Matchings
+                      <label
+                        className="form-check-label fw-semibold text-dark small interactive-label"
+                        htmlFor="partialMarkingEnabled"
+                      >
+                        Enable Partial Credit for Multi-Select Questions
                       </label>
                     </div>
-                    <small className="text-muted">
-                      Awards proportional points if candidate gets a subset of correct options without wrong selections.
-                    </small>
+                    <p className="text-muted small ps-4 mb-0" style={{ fontSize: '0.78rem' }}>
+                      Awards proportional score when student picks partial correct options without any wrong selections.
+                    </p>
                   </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* STEP 4: RULES & COMPETITIVE CONTROLS */}
+          {/* ================= STEP 4: RULES & CONTROLS ================= */}
           {currentStep === 4 && (
             <div>
-              <h5 className="fw-bold text-dark mb-4">Step 4: Examination Security & Rules Engine</h5>
-              <div className="row g-4">
-                
-                {/* Navigation Policy */}
-                <div className="col-md-6">
-                  <label className="form-label small fw-semibold text-secondary">Question Navigation Mode</label>
-                  <select name="questionNavigation" className="form-select" value={formData.questionNavigation} onChange={handleTextChange}>
-                    <option value="free">Free Palette Jump (Competitive Standard - jump to any question)</option>
-                    <option value="linear">Strict Linear (Must answer or skip in fixed order)</option>
+              <div className="border-bottom pb-3 mb-4">
+                <h5 className="fw-bold text-dark mb-1">Security & Test Environment</h5>
+                <p className="text-secondary small mb-0">Configure question shuffling, tab-switch proctoring, and navigation</p>
+              </div>
+
+              <div className="row g-3">
+                <div className="col-12 col-md-6">
+                  <label className="form-label small fw-semibold text-secondary">Question Navigation</label>
+                  <select
+                    name="questionNavigation"
+                    className="form-select py-2"
+                    value={formData.questionNavigation}
+                    onChange={handleTextChange}
+                  >
+                    <option value="free">Free Palette Jump (Students can jump to any question)</option>
+                    <option value="linear">Strict Linear (Sequential order only)</option>
                   </select>
                 </div>
 
-                <div className="col-md-6">
-                  <label className="form-label small fw-semibold text-secondary">Questions Per Page</label>
-                  <select name="questionsPerPage" className="form-select" value={formData.questionsPerPage} onChange={handleTextChange}>
-                    <option value="1">1 Question per view (Standard)</option>
-                    <option value="5">5 Questions per page</option>
-                  </select>
-                </div>
-
-                {/* Shuffling & Anti-Cheat */}
-                <div className="col-12">
-                  <h6 className="fw-bold text-secondary text-uppercase small mb-3">Randomization & Security</h6>
-                  <div className="row g-3">
-                    <div className="col-md-6">
-                      <div className="form-check form-switch p-3 border rounded-3 bg-light">
-                        <input
-                          className="form-check-input ms-0 me-3"
-                          type="checkbox"
-                          id="randomizeQuestionOrder"
-                          name="randomizeQuestionOrder"
-                          checked={formData.randomizeQuestionOrder}
-                          onChange={handleTextChange}
-                        />
-                        <label className="form-check-label small fw-semibold text-dark" htmlFor="randomizeQuestionOrder">
-                          Randomize Question Order per Candidate
-                        </label>
-                      </div>
-                    </div>
-
-                    <div className="col-md-6">
-                      <div className="form-check form-switch p-3 border rounded-3 bg-light">
-                        <input
-                          className="form-check-input ms-0 me-3"
-                          type="checkbox"
-                          id="randomizeOptionOrder"
-                          name="randomizeOptionOrder"
-                          checked={formData.randomizeOptionOrder}
-                          onChange={handleTextChange}
-                        />
-                        <label className="form-check-label small fw-semibold text-dark" htmlFor="randomizeOptionOrder">
-                          Randomize MCQ Options Order (A, B, C, D)
-                        </label>
-                      </div>
-                    </div>
-
-                    <div className="col-md-6">
-                      <div className="form-check form-switch p-3 border rounded-3 bg-light">
-                        <input
-                          className="form-check-input ms-0 me-3"
-                          type="checkbox"
-                          id="calculatorAllowed"
-                          name="calculatorAllowed"
-                          checked={formData.calculatorAllowed}
-                          onChange={handleTextChange}
-                        />
-                        <label className="form-check-label small fw-semibold text-dark" htmlFor="calculatorAllowed">
-                          Allow On-Screen Basic Calculator
-                        </label>
-                      </div>
-                    </div>
-
-                    <div className="col-md-6">
-                      <div className="p-3 border rounded-3 bg-light">
-                        <label className="form-label small fw-semibold text-dark mb-1">
-                          Tab Switch / Focus Lost Warning Limit
-                        </label>
-                        <input
-                          type="number"
-                          name="tabSwitchLimit"
-                          className="form-control form-control-sm"
-                          min="1"
-                          max="10"
-                          value={formData.tabSwitchLimit}
-                          onChange={handleTextChange}
-                        />
-                        <span className="text-muted" style={{ fontSize: '0.75rem' }}>
-                          Triggers integrity log when candidate switches away from test window.
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Attempts */}
-                <div className="col-md-4">
-                  <label className="form-label small fw-semibold text-secondary">Maximum Allowed Attempts</label>
+                <div className="col-12 col-md-6">
+                  <label className="form-label small fw-semibold text-secondary">Max Attempts Allowed</label>
                   <input
                     type="number"
                     name="maxAttempts"
-                    className="form-control"
+                    className="form-control py-2"
                     min="1"
-                    max="5"
+                    max="10"
                     value={formData.maxAttempts}
                     onChange={handleTextChange}
                   />
                 </div>
 
-                <div className="col-md-8 d-flex align-items-center mt-4">
-                  <div className="form-check form-switch">
-                    <input
-                      className="form-check-input"
-                      type="checkbox"
-                      id="isPracticeMode"
-                      name="isPracticeMode"
-                      checked={formData.isPracticeMode}
-                      onChange={handleTextChange}
-                    />
-                    <label className="form-check-label small fw-semibold text-secondary" htmlFor="isPracticeMode">
-                      Practice Mode (Shows immediate answer solutions after attempt without recording official marks)
-                    </label>
+                {/* Anti-Cheating & Randomization Toggles */}
+                <div className="col-12 col-md-6">
+                  <div className="form-check-card h-100">
+                    <div className="form-check form-switch">
+                      <input
+                        className="form-check-input ms-0 me-3"
+                        type="checkbox"
+                        id="randomizeQuestionOrder"
+                        name="randomizeQuestionOrder"
+                        checked={formData.randomizeQuestionOrder}
+                        onChange={handleTextChange}
+                        style={{ cursor: 'pointer' }}
+                      />
+                      <label
+                        className="form-check-label small fw-semibold text-dark interactive-label"
+                        htmlFor="randomizeQuestionOrder"
+                      >
+                        Randomize Question Order (Per candidate)
+                      </label>
+                    </div>
                   </div>
                 </div>
 
+                <div className="col-12 col-md-6">
+                  <div className="form-check-card h-100">
+                    <div className="form-check form-switch">
+                      <input
+                        className="form-check-input ms-0 me-3"
+                        type="checkbox"
+                        id="randomizeOptionOrder"
+                        name="randomizeOptionOrder"
+                        checked={formData.randomizeOptionOrder}
+                        onChange={handleTextChange}
+                        style={{ cursor: 'pointer' }}
+                      />
+                      <label
+                        className="form-check-label small fw-semibold text-dark interactive-label"
+                        htmlFor="randomizeOptionOrder"
+                      >
+                        Shuffle MCQ Options (A, B, C, D)
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="col-12 col-md-6">
+                  <div className="form-check-card h-100">
+                    <div className="form-check form-switch">
+                      <input
+                        className="form-check-input ms-0 me-3"
+                        type="checkbox"
+                        id="calculatorAllowed"
+                        name="calculatorAllowed"
+                        checked={formData.calculatorAllowed}
+                        onChange={handleTextChange}
+                        style={{ cursor: 'pointer' }}
+                      />
+                      <label
+                        className="form-check-label small fw-semibold text-dark interactive-label"
+                        htmlFor="calculatorAllowed"
+                      >
+                        Enable On-Screen Scientific Calculator
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="col-12 col-md-6">
+                  <div className="form-check-card h-100">
+                    <label className="form-label small fw-semibold text-dark mb-1">
+                      Tab-Switch Proctoring Limit
+                    </label>
+                    <div className="d-flex align-items-center gap-2">
+                      <input
+                        type="number"
+                        name="tabSwitchLimit"
+                        className="form-control form-control-sm"
+                        min="1"
+                        max="10"
+                        style={{ maxWidth: '100px' }}
+                        value={formData.tabSwitchLimit}
+                        onChange={handleTextChange}
+                      />
+                      <span className="text-muted small">warnings before auto-flagging</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="col-12">
+                  <div className="form-check-card">
+                    <div className="form-check form-switch">
+                      <input
+                        className="form-check-input ms-0 me-3"
+                        type="checkbox"
+                        id="isPracticeMode"
+                        name="isPracticeMode"
+                        checked={formData.isPracticeMode}
+                        onChange={handleTextChange}
+                        style={{ cursor: 'pointer' }}
+                      />
+                      <label
+                        className="form-check-label small fw-semibold text-dark interactive-label"
+                        htmlFor="isPracticeMode"
+                      >
+                        Self-Paced Practice Assessment (Shows immediate answer hints without recording formal gradebook scores)
+                      </label>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           )}
 
-          {/* Stepper Navigation Buttons */}
-          <div className="d-flex justify-content-between align-items-center border-top pt-4 mt-4">
+          {/* Stepper Footer Controls */}
+          <div className="d-flex flex-column flex-sm-row justify-content-between align-items-stretch align-items-sm-center gap-2 border-top pt-4 mt-4">
             {currentStep > 1 ? (
-              <button type="button" className="btn btn-outline-secondary px-4 d-flex align-items-center gap-1" onClick={handleBack}>
+              <button
+                type="button"
+                className="btn btn-outline-secondary fw-semibold d-flex align-items-center justify-content-center gap-2 py-2 px-3 rounded-3"
+                onClick={handleBack}
+                style={{ minHeight: '44px' }}
+              >
                 <ArrowLeft size={16} /> Back
               </button>
-            ) : <div />}
+            ) : (
+              <div className="d-none d-sm-block" />
+            )}
 
             {currentStep < 4 ? (
-              <button type="button" className="btn btn-primary px-4 fw-semibold d-flex align-items-center gap-1" onClick={handleNext}>
-                Next Step <ArrowRight size={16} />
+              <button
+                type="button"
+                className="btn btn-primary fw-semibold d-flex align-items-center justify-content-center gap-2 py-2 px-4 rounded-3 shadow-sm"
+                onClick={handleNext}
+                style={{ backgroundColor: '#2563eb', border: 'none', minHeight: '44px' }}
+              >
+                <span>Continue to Step {currentStep + 1}</span>
+                <ArrowRight size={16} />
               </button>
             ) : (
               <button
                 type="button"
-                className="btn btn-success px-4 fw-semibold d-flex align-items-center gap-2 shadow-sm"
+                className="btn btn-success fw-semibold d-flex align-items-center justify-content-center gap-2 py-2 px-4 rounded-3 shadow-sm"
                 onClick={handleSubmit}
                 disabled={loading}
+                style={{ minHeight: '44px' }}
               >
                 {loading ? (
                   <>
                     <span className="spinner-border spinner-border-sm" role="status" />
-                    Creating Examination...
+                    <span>Creating Blueprint...</span>
                   </>
                 ) : (
                   <>
-                    <CheckCircle2 size={16} /> Save & Proceed to Question Builder
+                    <CheckCircle2 size={18} />
+                    <span>Save & Build Questions</span>
                   </>
                 )}
               </button>
             )}
           </div>
-
         </div>
-
       </main>
     </div>
   );
