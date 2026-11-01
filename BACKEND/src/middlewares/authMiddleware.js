@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import User from '../models/userModel.js'; //  FIXED (no dot in userModel)
+import User from '../models/userModel.js';
 
 // 1. Verify JWT Token
 export const protect = async (req, res, next) => {
@@ -44,4 +44,26 @@ export const authorize = (...roles) => {
     }
     next();
   };
+};
+
+// 3. Helper: check if user is admin-level (superadmin or principal or admin)
+export const isAdminLevel = (role) =>
+  ['superadmin', 'principal', 'admin'].includes(role);
+
+// 4. Middleware: allow admin-level roles
+export const authorizeAdmin = (req, res, next) => {
+  if (!isAdminLevel(req.user.role)) {
+    return res.status(403).json({
+      success: false,
+      message: 'Admin-level access required',
+    });
+  }
+  next();
+};
+
+// 5. Middleware: teacher must own the exam or be admin-level
+export const authorizeTeacherOrAdmin = (getExamId) => async (req, res, next) => {
+  if (isAdminLevel(req.user.role)) return next();
+  if (req.user.role === 'teacher') return next();
+  return res.status(403).json({ success: false, message: 'Not authorized' });
 };

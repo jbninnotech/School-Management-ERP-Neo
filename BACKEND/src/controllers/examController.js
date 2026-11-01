@@ -4,10 +4,16 @@ import ExaminationAttempt from '../models/examinationAttemptModel.js';
 import ExaminationAuditLog from '../models/examinationAuditLogModel.js';
 import User from '../models/userModel.js';
 import {
+  createNotification,
   notifyStudentsExamScheduled,
   notifyStudentsExamCancelled,
   notifyStudentsResultsPublished,
+  notifyStudentsExamGoLive,
+  notifyStudentsExamPaused,
+  notifyStudentsExamResumed,
+  notifyStudentsExamEnded,
 } from '../services/notificationService.js';
+import { emitExamMonitorUpdate } from '../server.js';
 
 // Helper: Log audit event
 const logAuditEvent = async (examId, userId, userRole, action, details = {}, ip = '') => {
@@ -178,6 +184,7 @@ export const createExam = async (req, res, next) => {
       tabSwitchLimit,
       examSections,
       blueprint,
+      questionPaperId,
     } = req.body;
 
     if (!title || !classGrade || !subject) {
@@ -187,7 +194,7 @@ export const createExam = async (req, res, next) => {
       });
     }
 
-    const initialSections = examSections && examSections.length > 0
+    let initialSections = examSections && examSections.length > 0
       ? examSections
       : [
           {
@@ -200,6 +207,43 @@ export const createExam = async (req, res, next) => {
           },
         ];
 
+    let linkedPaperTitle = '';
+
+    // If a Question Paper was selected, snapshot its questions into the exam sections
+    if (questionPaperId) {
+      const QuestionPaper = (await import('../models/questionPaperModel.js')).default;
+      const qp = await QuestionPaper.findById(questionPaperId);
+      if (qp && qp.questions?.length > 0) {
+        linkedPaperTitle = qp.title;
+        initialSections = [
+          {
+            id: 'sec_1',
+            title: `Section A - ${qp.title}`,
+            description: `Questions imported from Question Paper: ${qp.title}`,
+            durationMinutes: 0,
+            totalMarks: qp.totalMarks || totalMarks || 100,
+            questions: qp.questions.map((q, idx) => ({
+              questionId: q.questionId ? q.questionId.toString() : (q._id ? q._id.toString() : `qp_${idx + 1}`),
+              questionText: q.questionText,
+              questionType: q.questionType || 'single_mcq',
+              difficulty: q.difficulty || 'medium',
+              chapter: q.chapter || '',
+              topic: q.topic || '',
+              marks: q.marks || 1,
+              negativeMarks: q.negativeMarks || 0,
+              instructionText: q.instructionText || '',
+              passageText: q.passageText || '',
+              imageUrl: q.imageUrl || '',
+              options: q.options || [],
+              correctAnswer: q.correctAnswer,
+              explanation: q.explanation || '',
+              order: idx,
+            })),
+          },
+        ];
+      }
+    }
+
     const exam = await Examination.create({
       title,
       category: category || 'unit_test',
@@ -211,6 +255,8 @@ export const createExam = async (req, res, next) => {
       description: description || '',
       instructions: instructions || 'Read all questions carefully.',
       createdBy: req.user._id,
+      questionPaperId: questionPaperId || null,
+      questionPaperTitle: linkedPaperTitle,
       status: 'draft',
       examDate: examDate ? new Date(examDate) : undefined,
       startTime: startTime ? new Date(startTime) : undefined,
@@ -274,17 +320,9 @@ export const getExams = async (req, res, next) => {
           { sections: { $exists: false } },
         ];
       }
-      query.status = { $in: ['scheduled', 'published', 'in_progress', 'completed', 'results_published', 'cancelled'] };
+      query.status = { $in: ['live', 'scheduled', 'published', 'in_progress', 'completed', 'results_published', 'cancelled'] };
     } else if (req.user.role === 'teacher') {
-      const assignedClasses = req.user.teacherProfile?.assignedClasses || [];
-      if (assignedClasses.length > 0) {
-        query.$or = [
-          { createdBy: req.user._id },
-          { classGrade: { $in: assignedClasses } },
-        ];
-      } else {
-        query.createdBy = req.user._id;
-      }
+      query.createdBy = req.user._id;
     }
 
     if (status) query.status = status;
@@ -342,6 +380,34 @@ export const getExamById = async (req, res, next) => {
 
     if (!exam) {
       return res.status(404).json({ success: false, message: 'Examination not found' });
+    }
+
+    if (req.user.role === 'student') {
+      const studentClass = req.user.studentProfile?.classGrade;
+      const studentSection = req.user.studentProfile?.section;
+
+      if (!studentClass || exam.classGrade !== studentClass) {
+        return res.status(403).json({
+          success: false,
+          message: `Access denied: This examination is restricted to ${exam.classGrade}.`,
+        });
+      }
+
+      if (exam.sections && exam.sections.length > 0 && studentSection) {
+        if (!exam.sections.includes(studentSection)) {
+          return res.status(403).json({
+            success: false,
+            message: `Access denied: This examination is not open to Section ${studentSection}.`,
+          });
+        }
+      }
+
+      if (['draft', 'pending_review', 'submitted_for_review', 'under_review', 'rejected'].includes(exam.status)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied: This examination has not been released.',
+        });
+      }
     }
 
     const examObj = exam.toObject();
@@ -600,6 +666,14 @@ export const scheduleExam = async (req, res, next) => {
       });
     }
 
+    const isAdminLevel = ['superadmin', 'principal', 'admin'].includes(req.user.role);
+    if (!isAdminLevel && !['approved', 'scheduled', 'published'].includes(exam.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot schedule: examination must be approved first. Current status: ${exam.status}`,
+      });
+    }
+
     if (['in_progress', 'completed', 'results_published'].includes(exam.status) || exam.isSnapshotLocked) {
       return res.status(400).json({
         success: false,
@@ -743,6 +817,266 @@ export const cancelExam = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
+// 8B. GO LIVE — ATOMIC EXAM ACTIVATION
+// -------------------------------------------------------------
+export const goLiveExam = async (req, res, next) => {
+  try {
+    const examId = req.params.id || req.params.examId;
+    const exam = await Examination.findById(examId);
+
+    if (!exam) {
+      return res.status(404).json({ success: false, message: 'Examination not found' });
+    }
+
+    if (req.user.role === 'teacher' && exam.createdBy && exam.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: 'You are only authorized to launch examinations you created',
+      });
+    }
+
+    if (exam.status === 'live' || exam.status === 'in_progress') {
+      return res.status(200).json({
+        success: true,
+        message: 'Examination is already LIVE and running',
+        data: exam,
+      });
+    }
+
+    const approvedStatuses = ['approved', 'scheduled', 'ready_to_launch'];
+    if (!approvedStatuses.includes(exam.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot go live: Examination must be approved first. Current status: ${exam.status}`,
+      });
+    }
+
+    const questionCount = (exam.examSections || []).reduce((acc, s) => acc + (s.questions?.length || 0), 0);
+    if (questionCount === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot launch examination with 0 questions in paper',
+      });
+    }
+
+    const serverNow = new Date();
+    exam.previousStatus = exam.status;
+    exam.status = 'live';
+    exam.actualLaunchTime = serverNow;
+    exam.launchedBy = req.user._id;
+    exam.isSnapshotLocked = true;
+
+    await exam.save();
+
+    await notifyStudentsExamGoLive(exam);
+
+    await logAuditEvent(exam._id, req.user._id, req.user.role, 'EXAM_GO_LIVE', {
+      launchedAt: serverNow,
+      previousStatus: exam.previousStatus,
+    });
+
+    try {
+      emitExamMonitorUpdate(exam._id.toString(), {
+        event: 'exam_live',
+        examId: exam._id,
+        status: 'live',
+        actualLaunchTime: serverNow,
+      });
+    } catch (e) {}
+
+    res.status(200).json({
+      success: true,
+      message: `Examination "${exam.title}" is now LIVE! Eligible students have been notified.`,
+      data: exam,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// -------------------------------------------------------------
+// 8C. PAUSE EXAM
+// -------------------------------------------------------------
+export const pauseExam = async (req, res, next) => {
+  try {
+    const examId = req.params.id || req.params.examId;
+    const { reason } = req.body;
+    const exam = await Examination.findById(examId);
+
+    if (!exam) {
+      return res.status(404).json({ success: false, message: 'Examination not found' });
+    }
+
+    if (req.user.role === 'teacher' && exam.createdBy && exam.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+
+    if (exam.status !== 'live' && exam.status !== 'in_progress') {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot pause examination that is not LIVE. Current status: ${exam.status}`,
+      });
+    }
+
+    exam.previousStatus = exam.status;
+    exam.status = 'paused';
+    exam.pausedAt = new Date();
+    exam.pauseReason = reason || 'Technical maintenance / Faculty pause';
+    await exam.save();
+
+    await notifyStudentsExamPaused(exam, reason);
+    await logAuditEvent(exam._id, req.user._id, req.user.role, 'EXAM_PAUSED', { reason });
+
+    try {
+      emitExamMonitorUpdate(exam._id.toString(), {
+        event: 'exam_paused',
+        examId: exam._id,
+        status: 'paused',
+        reason,
+      });
+    } catch (e) {}
+
+    res.status(200).json({
+      success: true,
+      message: 'Examination paused successfully',
+      data: exam,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// -------------------------------------------------------------
+// 8D. RESUME EXAM
+// -------------------------------------------------------------
+export const resumeExam = async (req, res, next) => {
+  try {
+    const examId = req.params.id || req.params.examId;
+    const exam = await Examination.findById(examId);
+
+    if (!exam) {
+      return res.status(404).json({ success: false, message: 'Examination not found' });
+    }
+
+    if (req.user.role === 'teacher' && exam.createdBy && exam.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+
+    if (exam.status !== 'paused') {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot resume examination that is not paused. Current status: ${exam.status}`,
+      });
+    }
+
+    const serverNow = new Date();
+    const pausedDurationMs = exam.pausedAt ? serverNow.getTime() - new Date(exam.pausedAt).getTime() : 0;
+    exam.totalPausedDurationMs = (exam.totalPausedDurationMs || 0) + pausedDurationMs;
+
+    if (pausedDurationMs > 0) {
+      const activeAttempts = await ExaminationAttempt.find({ examination: exam._id, status: 'in_progress' });
+      for (const att of activeAttempts) {
+        if (att.deadline) {
+          att.deadline = new Date(new Date(att.deadline).getTime() + pausedDurationMs);
+          await att.save();
+        }
+      }
+    }
+
+    exam.previousStatus = 'paused';
+    exam.status = 'live';
+    exam.pausedAt = null;
+    await exam.save();
+
+    await notifyStudentsExamResumed(exam);
+    await logAuditEvent(exam._id, req.user._id, req.user.role, 'EXAM_RESUMED', {
+      pausedDurationSeconds: Math.round(pausedDurationMs / 1000),
+    });
+
+    try {
+      emitExamMonitorUpdate(exam._id.toString(), {
+        event: 'exam_resumed',
+        examId: exam._id,
+        status: 'live',
+      });
+    } catch (e) {}
+
+    res.status(200).json({
+      success: true,
+      message: 'Examination resumed successfully and student timers extended',
+      data: exam,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// -------------------------------------------------------------
+// 8E. END EXAM
+// -------------------------------------------------------------
+export const endExam = async (req, res, next) => {
+  try {
+    const examId = req.params.id || req.params.examId;
+    const exam = await Examination.findById(examId);
+
+    if (!exam) {
+      return res.status(404).json({ success: false, message: 'Examination not found' });
+    }
+
+    if (req.user.role === 'teacher' && exam.createdBy && exam.createdBy.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ success: false, message: 'Unauthorized' });
+    }
+
+    if (!['live', 'in_progress', 'paused'].includes(exam.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot end examination with status "${exam.status}"`,
+      });
+    }
+
+    const serverNow = new Date();
+    exam.previousStatus = exam.status;
+    exam.status = 'completed';
+    exam.actualEndTime = serverNow;
+    await exam.save();
+
+    const inProgressAttempts = await ExaminationAttempt.find({
+      examination: exam._id,
+      status: 'in_progress',
+    });
+
+    for (const att of inProgressAttempts) {
+      att.status = 'submitted';
+      att.submittedAt = serverNow;
+      att.submissionType = 'admin_forced';
+      await att.save();
+    }
+
+    await notifyStudentsExamEnded(exam);
+    await logAuditEvent(exam._id, req.user._id, req.user.role, 'EXAM_ENDED', {
+      endedAt: serverNow,
+      autoSubmittedCount: inProgressAttempts.length,
+    });
+
+    try {
+      emitExamMonitorUpdate(exam._id.toString(), {
+        event: 'exam_ended',
+        examId: exam._id,
+        status: 'completed',
+      });
+    } catch (e) {}
+
+    res.status(200).json({
+      success: true,
+      message: `Examination concluded successfully. ${inProgressAttempts.length} active student attempt(s) were finalized.`,
+      data: exam,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// -------------------------------------------------------------
 // 9. START OR RESUME ATTEMPT
 // -------------------------------------------------------------
 export const startExamAttempt = async (req, res, next) => {
@@ -759,28 +1093,45 @@ export const startExamAttempt = async (req, res, next) => {
       });
     }
 
-    if (['draft', 'submitted_for_review', 'rejected'].includes(exam.status)) {
+    if (exam.status === 'paused') {
       return res.status(400).json({
         success: false,
-        message: 'This examination has not yet been scheduled or published',
+        message: 'This examination is currently paused by faculty. Please stand by.',
+      });
+    }
+
+    if (['completed', 'results_published', 'expired'].includes(exam.status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'This examination has already concluded.',
+      });
+    }
+
+    if (['draft', 'submitted_for_review', 'under_review', 'rejected'].includes(exam.status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'This examination has not yet been approved or scheduled',
       });
     }
 
     const serverNowCheck = new Date();
-    if (exam.startTime && serverNowCheck < new Date(exam.startTime) && !exam.isPracticeMode) {
-      return res.status(400).json({
-        success: false,
-        message: `This examination is scheduled to start at ${new Date(exam.startTime).toLocaleString()}`,
-      });
+    const isLive = exam.status === 'live' || exam.status === 'in_progress';
+    if (!isLive && !exam.isPracticeMode) {
+      if (exam.startTime && serverNowCheck < new Date(exam.startTime)) {
+        return res.status(400).json({
+          success: false,
+          message: `This examination is scheduled to start at ${new Date(exam.startTime).toLocaleString()}`,
+        });
+      }
     }
 
     const studentClass = req.user.studentProfile?.classGrade;
     const studentSection = req.user.studentProfile?.section;
 
-    if (studentClass && exam.classGrade !== studentClass) {
+    if (!studentClass || exam.classGrade !== studentClass) {
       return res.status(403).json({
         success: false,
-        message: `This examination is configured for ${exam.classGrade}, but your profile is registered under ${studentClass}`,
+        message: `This examination is configured for ${exam.classGrade}, but your profile is registered under ${studentClass || 'an unassigned class'}`,
       });
     }
 
@@ -1130,7 +1481,7 @@ export const attemptHeartbeat = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 11. RECORD TAB SWITCH
+// 11. RECORD TAB SWITCH & LOG VIOLATION (ANTI-CHEAT)
 // -------------------------------------------------------------
 export const recordTabSwitch = async (req, res, next) => {
   try {
@@ -1165,7 +1516,91 @@ export const recordTabSwitch = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 12. SUBMIT EXAMINATION ATTEMPT
+// 11B. LOG ATTEMPT VIOLATION (Phase 8 Anti-Cheat Endpoint)
+// -------------------------------------------------------------
+export const logAttemptViolation = async (req, res, next) => {
+  try {
+    const attemptId = req.params.attemptId || req.body.attemptId;
+    const { type, reason, deviceInfo } = req.body;
+
+    if (!attemptId || !mongoose.Types.ObjectId.isValid(attemptId)) {
+      return res.status(400).json({ success: false, message: 'Invalid attempt ID' });
+    }
+
+    const attempt = await ExaminationAttempt.findById(attemptId).populate('examination student');
+    if (!attempt) {
+      return res.status(404).json({ success: false, message: 'Attempt not found' });
+    }
+
+    if (attempt.status !== 'in_progress') {
+      return res.status(200).json({
+        success: false,
+        message: 'Attempt is no longer in progress',
+        status: attempt.status,
+      });
+    }
+
+    const exam = attempt.examination;
+    const maxAllowedWarnings = exam?.maxWarnings || 3;
+
+    attempt.tabSwitchesCount = (attempt.tabSwitchesCount || 0) + 1;
+    const currentWarningNumber = attempt.tabSwitchesCount;
+
+    const ViolationLog = (await import('../models/violationLogModel.js')).default;
+    await ViolationLog.create({
+      attempt: attempt._id,
+      student: attempt.student._id,
+      examination: exam._id,
+      type: type || 'tab_switch',
+      reason: reason || 'Anti-cheat breach detected',
+      warningNumber: currentWarningNumber,
+      maxWarnings: maxAllowedWarnings,
+      deviceInfo: deviceInfo || {},
+      timestamp: new Date(),
+    });
+
+    let autoSubmitted = false;
+    if (currentWarningNumber >= maxAllowedWarnings) {
+      attempt.status = 'auto_submitted';
+      attempt.submittedAt = new Date();
+      attempt.submissionType = 'auto_submitted_violation';
+      autoSubmitted = true;
+    }
+
+    attempt.lastHeartbeat = new Date();
+    await attempt.save();
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`exam_${exam._id}`).emit('student_violation', {
+        attemptId: attempt._id,
+        studentId: attempt.student._id,
+        studentName: attempt.student.name,
+        rollNumber: attempt.student.studentProfile?.rollNumber || '',
+        warningNumber: currentWarningNumber,
+        maxWarnings: maxAllowedWarnings,
+        violationType: type,
+        autoSubmitted,
+        timestamp: new Date(),
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      warningCount: currentWarningNumber,
+      maxWarnings: maxAllowedWarnings,
+      autoSubmitted,
+      message: autoSubmitted
+        ? 'Maximum warnings exceeded. Examination has been automatically submitted.'
+        : `Warning ${currentWarningNumber} of ${maxAllowedWarnings} recorded.`,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// -------------------------------------------------------------
+// 12. SUBMIT EXAMINATION ATTEMPT (Idempotent + Atomic Save)
 // -------------------------------------------------------------
 export const submitExamAttempt = async (req, res, next) => {
   try {
@@ -1173,28 +1608,60 @@ export const submitExamAttempt = async (req, res, next) => {
     const submissionType = req.body.submissionType || 'manual';
 
     if (!attemptId) {
-      return res.status(400).json({ success: false, message: 'Attempt ID is required for submission' });
+      return res.status(400).json({
+        success: false,
+        field: 'attemptId',
+        message: 'Missing attempt ID. Please provide attemptId in the request body.',
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(attemptId)) {
+      return res.status(400).json({
+        success: false,
+        field: 'attemptId',
+        message: 'Invalid attempt ID format.',
+      });
     }
 
     const attempt = await ExaminationAttempt.findById(attemptId);
     if (!attempt) {
-      return res.status(404).json({ success: false, message: 'Examination attempt not found' });
-    }
-
-    if (attempt.student.toString() !== req.user._id.toString() && req.user.role !== 'admin' && req.user.role !== 'superadmin') {
-      return res.status(403).json({ success: false, message: 'Unauthorized to submit this attempt' });
-    }
-
-    if (['submitted', 'auto_submitted', 'evaluated', 'result_published'].includes(attempt.status)) {
-      return res.status(400).json({
+      return res.status(404).json({
         success: false,
-        message: 'This examination attempt has already been submitted',
+        message: 'Examination attempt not found for the provided ID.',
+      });
+    }
+
+    if (
+      attempt.student.toString() !== req.user._id.toString() &&
+      req.user.role !== 'admin' &&
+      req.user.role !== 'superadmin' &&
+      req.user.role !== 'principal'
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: 'Unauthorized: You can only submit your own examination attempt.',
       });
     }
 
     const exam = await Examination.findById(attempt.examination);
     if (!exam) {
-      return res.status(404).json({ success: false, message: 'Exam record not found' });
+      return res.status(404).json({ success: false, message: 'Associated examination record not found' });
+    }
+
+    // IDEMPOTENCY: If already submitted, return existing state with success=true
+    if (['submitted', 'auto_submitted', 'evaluation_pending', 'evaluated', 'result_published'].includes(attempt.status)) {
+      return res.status(200).json({
+        success: true,
+        isAlreadySubmitted: true,
+        message: 'Examination attempt is already submitted.',
+        data: {
+          attemptId: attempt._id,
+          status: attempt.status,
+          submittedAt: attempt.submittedAt,
+          autoScore: attempt.score?.autoScore || 0,
+          maxMarks: exam.totalMarks,
+        },
+      });
     }
 
     const serverNow = new Date();
@@ -1249,10 +1716,11 @@ export const submitExamAttempt = async (req, res, next) => {
     attempt.score.isPassed = attempt.score.totalScore >= exam.passingMarks;
     attempt.score.sectionWiseScores = Object.values(sectionScores);
 
+    // Default: submitted state awaiting teacher review/approval
     if (hasSubjectiveQuestions) {
       attempt.status = 'evaluation_pending';
     } else {
-      attempt.status = 'evaluated';
+      attempt.status = 'submitted';
     }
 
     if (exam.resultPublicationMode === 'immediate') {
@@ -1260,7 +1728,22 @@ export const submitExamAttempt = async (req, res, next) => {
       attempt.resultPublishedAt = serverNow;
     }
 
-    await attempt.save();
+    // Atomic update avoids Mongoose VersionError from background heartbeats/violations
+    await ExaminationAttempt.findByIdAndUpdate(
+      attempt._id,
+      {
+        $set: {
+          submittedAt: serverNow,
+          submissionType: submissionType,
+          status: attempt.status,
+          score: attempt.score,
+          answers: attempt.answers,
+          isResultPublished: attempt.isResultPublished,
+          resultPublishedAt: attempt.resultPublishedAt,
+        },
+      },
+      { new: true }
+    );
 
     await logAuditEvent(exam._id, req.user._id, req.user.role, 'EXAM_SUBMITTED', {
       submissionType,
@@ -1268,9 +1751,25 @@ export const submitExamAttempt = async (req, res, next) => {
       hasSubjectiveQuestions,
     });
 
+    // Notify teacher safely (failure won't crash submission response)
+    if (exam.createdBy) {
+      try {
+        await createNotification({
+          recipient: exam.createdBy,
+          type: 'exam_submitted_successfully',
+          title: `Exam Submitted: ${req.user.name}`,
+          message: `${req.user.name} (${req.user.studentProfile?.rollNumber || 'Student'}) submitted their attempt for ${exam.title}.`,
+          link: `/exams/${exam._id}/evaluations`,
+          examination: exam,
+        });
+      } catch (notifErr) {
+        console.warn('[Notification] Failed to send teacher submit notification:', notifErr.message);
+      }
+    }
+
     res.status(200).json({
       success: true,
-      message: 'Examination submitted successfully',
+      message: 'Examination submitted successfully.',
       data: {
         attemptId: attempt._id,
         status: attempt.status,
@@ -1655,7 +2154,7 @@ export const getStudentResult = async (req, res, next) => {
 };
 
 // -------------------------------------------------------------
-// 20. GET LIVE EXAM MONITOR (FIXES 404 /api/exams/:id/monitor)
+// 20. GET LIVE EXAM MONITOR
 // -------------------------------------------------------------
 export const getExamMonitor = async (req, res, next) => {
   try {
@@ -1669,22 +2168,19 @@ export const getExamMonitor = async (req, res, next) => {
       });
     }
 
-    // 1. Fetch eligible student count for this exam's class and sections
     const studentQuery = { role: 'student', 'studentProfile.classGrade': exam.classGrade };
     if (exam.sections && exam.sections.length > 0) {
       studentQuery['studentProfile.section'] = { $in: exam.sections };
     }
     const totalEligible = await User.countDocuments(studentQuery);
 
-    // 2. Fetch all student attempts for this examination
     const attempts = await ExaminationAttempt.find({ examination: examId })
       .populate('student', 'name email schoolId studentProfile')
       .sort({ updatedAt: -1 });
 
     const now = Date.now();
-    const HEARTBEAT_WINDOW_MS = 60 * 1000; // 60 seconds
+    const HEARTBEAT_WINDOW_MS = 60 * 1000;
 
-    // 3. Calculate telemetry & proctoring status for each student
     const studentAttempts = attempts.map((att) => {
       const lastPingTime = att.lastHeartbeat
         ? new Date(att.lastHeartbeat).getTime()
@@ -1722,7 +2218,6 @@ export const getExamMonitor = async (req, res, next) => {
       };
     });
 
-    // 4. Summary metrics
     const stats = {
       totalEligible,
       totalStarted: studentAttempts.length,

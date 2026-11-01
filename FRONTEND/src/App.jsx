@@ -11,10 +11,13 @@ import AddStudent from './pages/students/AddStudent.jsx';
 import ExamList from './pages/exams/ExamList.jsx';
 import CreateExamWizard from './pages/exams/CreateExamWizard.jsx';
 import QuestionPaperBuilder from './pages/exams/QuestionPaperBuilder.jsx';
+import QuestionPaperList from './pages/exams/QuestionPaperList.jsx';
 import QuestionBank from './pages/exams/QuestionBank.jsx';
 import ExamApproval from './pages/exams/ExamApproval.jsx';
 import StudentExamInterface from './pages/exams/StudentExamInterface.jsx';
+import ExamErrorBoundary from './components/ExamErrorBoundary.jsx';
 import LiveExamMonitor from './pages/exams/LiveExamMonitor.jsx';
+import LiveExamsSection from './pages/exams/LiveExamsSection.jsx';
 import TeacherEvaluation from './pages/exams/TeacherEvaluation.jsx';
 import ExamResultsDashboard from './pages/exams/ExamResultsDashboard.jsx';
 import StudentResultView from './pages/exams/StudentResultView.jsx';
@@ -53,7 +56,7 @@ export default function App() {
         <Route
           path="/teachers"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
               <TeacherList />
             </ProtectedRoute>
           }
@@ -73,7 +76,7 @@ export default function App() {
         <Route
           path="/students"
           element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
               <StudentList />
             </ProtectedRoute>
           }
@@ -101,6 +104,16 @@ export default function App() {
           }
         />
 
+        {/* Dedicated Live Exams Center (Phase 4) */}
+        <Route
+          path="/exams/live"
+          element={
+            <ProtectedRoute>
+              <LiveExamsSection />
+            </ProtectedRoute>
+          }
+        />
+
         {/* Create Examination Wizard (SuperAdmin, Admin, Teacher) */}
         <Route
           path="/exams/create"
@@ -117,6 +130,16 @@ export default function App() {
           element={
             <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
               <QuestionPaperBuilder />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Master Question Papers Hub (Phase 3 & Issue 3) */}
+        <Route
+          path="/question-papers"
+          element={
+            <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
+              <QuestionPaperList />
             </ProtectedRoute>
           }
         />
@@ -156,7 +179,9 @@ export default function App() {
           path="/exams/:id/take"
           element={
             <ProtectedRoute allowedRoles={['student']}>
-              <StudentExamInterface />
+              <ExamErrorBoundary>
+                <StudentExamInterface />
+              </ExamErrorBoundary>
             </ProtectedRoute>
           }
         />

@@ -43,6 +43,8 @@ export default function Sidebar({ user }) {
 
   // Fetch unread notifications count
   useEffect(() => {
+    let interval = null;
+
     const fetchUnread = async () => {
       try {
         const res = await API.get('/notifications/unread-count');
@@ -53,9 +55,37 @@ export default function Sidebar({ user }) {
         // silent
       }
     };
+
+    const startPolling = () => {
+      if (!interval) {
+        interval = setInterval(fetchUnread, 45000);
+      }
+    };
+
+    const stopPolling = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        fetchUnread();
+        startPolling();
+      }
+    };
+
     fetchUnread();
-    const interval = setInterval(fetchUnread, 15000);
-    return () => clearInterval(interval);
+    startPolling();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   const currentUser = user || JSON.parse(sessionStorage.getItem('user') || '{}');
@@ -360,7 +390,18 @@ export default function Sidebar({ user }) {
           >
             <FileCheck2 className="me-2 text-primary flex-shrink-0" size={16} />
             <span className="text-truncate">{role === 'student' ? 'My Examinations' : 'Examinations Hub'}</span>
-            {role === 'student' && <span style={styles.badgeLive}>LIVE</span>}
+          </Link>
+
+          {/* Dedicated Live Exams Section (Phase 4) */}
+          <Link
+            to="/exams/live"
+            className="sidebar-item-link"
+            style={styles.navLink(isCurrentPath('/exams/live'))}
+            onClick={() => setIsMobileOpen(false)}
+          >
+            <Calendar className="me-2 text-danger flex-shrink-0" size={16} />
+            <span className="text-truncate">Live Exams</span>
+            <span style={styles.badgeLive}>LIVE</span>
           </Link>
 
           {canManageExams && (
@@ -372,6 +413,18 @@ export default function Sidebar({ user }) {
             >
               <PlusCircle className="me-2 text-success flex-shrink-0" size={16} />
               <span className="text-truncate">Create Examination</span>
+            </Link>
+          )}
+
+          {canManageExams && (
+            <Link
+              to="/question-papers"
+              className="sidebar-item-link"
+              style={styles.navLink(isCurrentPath('/question-papers'))}
+              onClick={() => setIsMobileOpen(false)}
+            >
+              <BookOpen className="me-2 text-indigo-400 flex-shrink-0" size={16} />
+              <span className="text-truncate">Question Papers</span>
             </Link>
           )}
 
@@ -430,51 +483,55 @@ export default function Sidebar({ user }) {
             )}
           </Link>
 
-          {/* SECTION 3: FACULTY & STUDENTS */}
-          <div style={styles.navSectionTitle}>FACULTY & STUDENTS</div>
+          {/* SECTION 3: FACULTY & STUDENTS (Hidden for Students) */}
+          {role !== 'student' && (
+            <>
+              <div style={styles.navSectionTitle}>FACULTY & STUDENTS</div>
 
-          <Link
-            to="/teachers"
-            className="sidebar-item-link"
-            style={styles.navLink(isCurrentPath('/teachers'))}
-            onClick={() => setIsMobileOpen(false)}
-          >
-            <Users className="me-2 text-info flex-shrink-0" size={16} />
-            <span className="text-truncate">Teachers Directory</span>
-          </Link>
+              <Link
+                to="/teachers"
+                className="sidebar-item-link"
+                style={styles.navLink(isCurrentPath('/teachers'))}
+                onClick={() => setIsMobileOpen(false)}
+              >
+                <Users className="me-2 text-info flex-shrink-0" size={16} />
+                <span className="text-truncate">Teachers Directory</span>
+              </Link>
 
-          {canManageTeachers && (
-            <Link
-              to="/teachers/add"
-              className="sidebar-item-link"
-              style={styles.navLink(isCurrentPath('/teachers/add'))}
-              onClick={() => setIsMobileOpen(false)}
-            >
-              <UserPlus className="me-2 text-success flex-shrink-0" size={16} />
-              <span className="text-truncate">Add New Teacher</span>
-            </Link>
-          )}
+              {canManageTeachers && (
+                <Link
+                  to="/teachers/add"
+                  className="sidebar-item-link"
+                  style={styles.navLink(isCurrentPath('/teachers/add'))}
+                  onClick={() => setIsMobileOpen(false)}
+                >
+                  <UserPlus className="me-2 text-success flex-shrink-0" size={16} />
+                  <span className="text-truncate">Add New Teacher</span>
+                </Link>
+              )}
 
-          <Link
-            to="/students"
-            className="sidebar-item-link"
-            style={styles.navLink(isCurrentPath('/students'))}
-            onClick={() => setIsMobileOpen(false)}
-          >
-            <GraduationCap className="me-2 text-warning flex-shrink-0" size={16} />
-            <span className="text-truncate">Students Directory</span>
-          </Link>
+              <Link
+                to="/students"
+                className="sidebar-item-link"
+                style={styles.navLink(isCurrentPath('/students'))}
+                onClick={() => setIsMobileOpen(false)}
+              >
+                <GraduationCap className="me-2 text-warning flex-shrink-0" size={16} />
+                <span className="text-truncate">Students Directory</span>
+              </Link>
 
-          {canManageExams && (
-            <Link
-              to="/students/add"
-              className="sidebar-item-link"
-              style={styles.navLink(isCurrentPath('/students/add'))}
-              onClick={() => setIsMobileOpen(false)}
-            >
-              <UserPlus className="me-2 text-amber-400 flex-shrink-0" size={16} />
-              <span className="text-truncate">Enroll Student</span>
-            </Link>
+              {canManageExams && (
+                <Link
+                  to="/students/add"
+                  className="sidebar-item-link"
+                  style={styles.navLink(isCurrentPath('/students/add'))}
+                  onClick={() => setIsMobileOpen(false)}
+                >
+                  <UserPlus className="me-2 text-amber-400 flex-shrink-0" size={16} />
+                  <span className="text-truncate">Enroll Student</span>
+                </Link>
+              )}
+            </>
           )}
         </div>
 

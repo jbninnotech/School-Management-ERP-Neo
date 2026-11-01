@@ -97,8 +97,18 @@ const examinationAttemptSchema = new mongoose.Schema(
     },
     submissionType: {
       type: String,
-      enum: ['manual', 'auto_timeout', 'admin_forced'],
+      enum: ['manual', 'auto_timeout', 'admin_forced', 'auto_submitted_violation'],
       default: 'manual',
+    },
+    location: {
+      latitude: { type: Number, default: null },
+      longitude: { type: Number, default: null },
+      accuracy: { type: Number, default: null },
+      timestamp: { type: Date, default: null },
+    },
+    cameraSnapshotCount: {
+      type: Number,
+      default: 0,
     },
     answers: [studentAnswerSchema],
     tabSwitchesCount: {

@@ -332,6 +332,7 @@ export default function LiveExamMonitor() {
                   <th>Status</th>
                   <th>Answered</th>
                   <th>Time Left</th>
+                  <th>Warnings / Breaches</th>
                   <th>Last Ping</th>
                   <th className="text-end">Actions</th>
                 </tr>
@@ -392,7 +393,26 @@ export default function LiveExamMonitor() {
                         )}
                       </td>
                       <td>
-                        <span className="small text-muted">
+                        {stu.tabSwitchesCount > 0 ? (
+                          <span className={`badge px-2 py-1 ${stu.tabSwitchesCount >= 3 ? 'bg-danger text-white' : 'bg-warning text-dark'}`}>
+                            <ShieldAlert size={12} className="inline me-1" />
+                            {stu.tabSwitchesCount} violation(s)
+                          </span>
+                        ) : (
+                          <span className="badge bg-success-subtle text-success">Clean (0)</span>
+                        )}
+                      </td>
+                      <td>
+                        <span className="small text-muted d-flex align-items-center gap-1">
+                          <span
+                            className="rounded-circle"
+                            style={{
+                              width: '8px',
+                              height: '8px',
+                              backgroundColor: stu.lastHeartbeatAt && (new Date() - new Date(stu.lastHeartbeatAt) < 60000) ? '#22c55e' : '#ef4444',
+                              display: 'inline-block',
+                            }}
+                          />
                           {stu.lastHeartbeatAt
                             ? new Date(stu.lastHeartbeatAt).toLocaleTimeString()
                             : 'No ping'}

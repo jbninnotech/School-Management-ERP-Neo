@@ -33,9 +33,37 @@ export default function NotificationBell({ onSelectExam }) {
   useEffect(() => {
     fetchNotifications();
 
-    // Poll for notifications every 15 seconds so new exam schedules appear live
-    const interval = setInterval(fetchNotifications, 15000);
-    return () => clearInterval(interval);
+    let interval = null;
+
+    const startPolling = () => {
+      if (!interval) {
+        interval = setInterval(fetchNotifications, 45000); // 45 seconds polling
+      }
+    };
+
+    const stopPolling = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+      } else {
+        fetchNotifications();
+        startPolling();
+      }
+    };
+
+    startPolling();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   // Close dropdown on click outside

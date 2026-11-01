@@ -10,8 +10,10 @@ const examinationSectionSchema = new mongoose.Schema(
     questions: [
       {
         questionId: {
-          type: mongoose.Schema.Types.ObjectId,
-          ref: 'Question',
+          type: String, // ✅ FIXED: Changed from mongoose.Schema.Types.ObjectId to String to allow "q_1_1"
+          default: function () {
+            return new mongoose.Types.ObjectId().toString();
+          },
         },
         questionText: { type: String, required: true },
         questionType: { type: String, required: true },
@@ -111,24 +113,71 @@ const examinationSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
+    questionPaperId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'QuestionPaper',
+      default: null,
+    },
+    questionPaperTitle: {
+      type: String,
+      default: '',
+    },
 
     // Workflow & Approval
     status: {
       type: String,
       enum: [
         'draft',
+        'pending_review',
         'submitted_for_review',
+        'under_review',
         'approved',
         'rejected',
         'scheduled',
+        'ready_to_launch',
         'published',
         'in_progress',
+        'live',
+        'paused',
+        'resumed',
         'completed',
+        'evaluation_pending',
         'results_published',
         'cancelled',
+        'expired',
       ],
       default: 'draft',
       index: true,
+    },
+    previousStatus: {
+      type: String,
+      default: '',
+    },
+    actualLaunchTime: {
+      type: Date,
+    },
+    actualEndTime: {
+      type: Date,
+    },
+    launchedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    pausedAt: {
+      type: Date,
+    },
+    pauseReason: {
+      type: String,
+      default: '',
+    },
+    totalPausedDurationMs: {
+      type: Number,
+      default: 0,
+    },
+    launchMode: {
+      type: String,
+      enum: ['manual', 'automatic'],
+      default: 'manual',
     },
     reviewedBy: {
       type: mongoose.Schema.Types.ObjectId,

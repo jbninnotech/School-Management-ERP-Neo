@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import API from '../../api/api.js';
+import CameraProctor from '../../components/CameraProctor.jsx';
+import ExamErrorBoundary from '../../components/ExamErrorBoundary.jsx';
 import {
   Clock,
   CheckCircle2,
@@ -15,7 +17,9 @@ import {
   Eye,
   ShieldAlert,
   HelpCircle,
-  Calculator
+  Calculator,
+  Camera,
+  Radio
 } from 'lucide-react';
 
 export default function StudentExamInterface() {
@@ -43,62 +47,103 @@ export default function StudentExamInterface() {
   const [calcResult, setCalcResult] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Countdown timer ref
-  const timerRef = useRef(null);
+  // References
+  const timerRef = useRef(null); // <-- FIXED: Added missing timerRef
+  const heartbeatIntervalRef = useRef(null);
+  const lastViolationTimeRef = useRef(0);
+  const seqRef = useRef(1);
 
-  // 1. Initialize Examination Attempt
-  useEffect(() => {
-    const initExam = async () => {
-      setLoading(true);
-      try {
-        const res = await API.post(`/exams/${id}/start-attempt`);
-        const { attempt: att, exam: ex, timeRemainingSeconds } = res.data?.data || {};
+  const [permissionGranted, setPermissionGranted] = useState(false);
+  const [permissionError, setPermissionError] = useState('');
+  const [askingPermissions, setAskingPermissions] = useState(false);
+  const [userLocation, setUserLocation] = useState(null);
+  const [violationMessage, setViolationMessage] = useState('');
+  const [maxWarnings, setMaxWarnings] = useState(3);
+  const [hasNetworkSubmitError, setHasNetworkSubmitError] = useState(false);
+  const [initError, setInitError] = useState('');
+  const [resumedNotice, setResumedNotice] = useState(false);
 
-        setExam(ex);
-        setAttempt(att);
-        setSecondsRemaining(timeRemainingSeconds || 3600);
+  // 1. Initialize or Resume Examination Attempt
+  const initExam = async () => {
+    setLoading(true);
+    setInitError('');
+    try {
+      const res = await API.post(`/exams/${id}/start-attempt`, {
+        location: userLocation || undefined,
+      });
 
-        // Flatten all questions across sections into a single linear array
-        const allQs = [];
-        ex.examSections?.forEach((sec) => {
-          sec.questions?.forEach((q) => {
-            allQs.push({
-              ...q,
-              sectionId: sec.id,
-              sectionTitle: sec.title,
-            });
+      const { attempt: att, exam: ex, timeRemainingSeconds } = res.data?.data || {};
+
+      if (!ex || !att) {
+        throw new Error('Received incomplete examination data from server.');
+      }
+
+      setExam(ex);
+      setAttempt(att);
+      setSecondsRemaining(typeof timeRemainingSeconds === 'number' ? timeRemainingSeconds : 3600);
+
+      if (res.data?.message?.toLowerCase().includes('resum')) {
+        setResumedNotice(true);
+      }
+
+      // Flatten all questions across sections safely
+      const allQs = [];
+      (ex.examSections || []).forEach((sec, sIdx) => {
+        (sec.questions || []).forEach((q, qIdx) => {
+          allQs.push({
+            ...q,
+            questionId: q.questionId || q._id || `q_${sIdx}_${qIdx}`,
+            sectionId: sec.id || `sec_${sIdx + 1}`,
+            sectionTitle: sec.title || `Section ${sIdx + 1}`,
           });
         });
+      });
 
-        // If randomize question order is configured
-        if (ex.randomizeQuestionOrder) {
-          allQs.sort(() => Math.random() - 0.5);
-        }
-        setQuestions(allQs);
-
-        // Populate responses map from attempt
-        const respMap = {};
-        allQs.forEach((q, idx) => {
-          const qId = q.questionId ? q.questionId.toString() : q._id.toString();
-          const existingAns = att.answers?.find((a) => a.questionId === qId);
-
-          respMap[qId] = {
-            studentAnswer: existingAns ? existingAns.studentAnswer : null,
-            isAnswered: existingAns ? existingAns.isAnswered : false,
-            isMarkedForReview: existingAns ? existingAns.isMarkedForReview : false,
-            visited: idx === 0 ? true : (existingAns ? existingAns.visited : false),
-          };
-        });
-        setResponses(respMap);
-
-      } catch (err) {
-        window.alert(err.response?.data?.message || err.message || 'Error starting exam');
-        navigate('/exams');
-      } finally {
-        setLoading(false);
+      if (ex.randomizeQuestionOrder) {
+        allQs.sort(() => Math.random() - 0.5);
       }
+      setQuestions(allQs);
+
+      // Populate responses map from attempt answers safely
+      const respMap = {};
+      allQs.forEach((q, idx) => {
+        const qId = q.questionId ? q.questionId.toString() : (q._id ? q._id.toString() : `q_${idx}`);
+        const existingAns = att.answers?.find((a) => a?.questionId?.toString() === qId);
+
+        respMap[qId] = {
+          studentAnswer: existingAns?.studentAnswer ?? null,
+          isAnswered: Boolean(existingAns?.isAnswered),
+          isMarkedForReview: Boolean(existingAns?.isMarkedForReview),
+          visited: idx === 0 ? true : Boolean(existingAns?.visited),
+        };
+      });
+      setResponses(respMap);
+
+    } catch (err) {
+      console.error('Failed to initialize or resume exam attempt:', err);
+      const errMsg = err.response?.data?.message || err.message || 'Error starting exam';
+      setInitError(errMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Check already granted permissions on load to skip device screen if already active
+  useEffect(() => {
+    const checkExistingPermissions = async () => {
+      try {
+        if (navigator.permissions && navigator.permissions.query) {
+          const camPerm = await navigator.permissions.query({ name: 'camera' }).catch(() => null);
+          const geoPerm = await navigator.permissions.query({ name: 'geolocation' }).catch(() => null);
+
+          if (camPerm?.state === 'granted' && geoPerm?.state === 'granted') {
+            setPermissionGranted(true);
+          }
+        }
+      } catch (_) {}
     };
 
+    checkExistingPermissions();
     initExam();
   }, [id]);
 
@@ -117,49 +162,168 @@ export default function StudentExamInterface() {
       });
     }, 1000);
 
-    return () => clearInterval(timerRef.current);
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
   }, [loading, attempt]);
 
-  // 3. Tab Visibility / Anti-Cheat Listener
-  useEffect(() => {
-    if (!exam || !exam.fullScreenWarningEnabled) return;
+  // Request Mandatory Camera and Geolocation Access (Phase 6)
+  const requestMediaAndLocationPermissions = async () => {
+    setAskingPermissions(true);
+    setPermissionError('');
+    try {
+      // 1. Camera check
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Media Devices API is not supported by your browser.');
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      // Stop initial verification stream; CameraProctor handles persistent feed
+      stream.getTracks().forEach((t) => t.stop());
 
-    const handleVisibilityChange = async () => {
-      if (document.hidden && attempt) {
-        setTabSwitchCount((prev) => prev + 1);
+      // 2. Geolocation check
+      if (!navigator.geolocation) {
+        throw new Error('Geolocation is not supported by your browser.');
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const loc = {
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            timestamp: new Date(),
+          };
+          setUserLocation(loc);
+          setPermissionGranted(true);
+          setAskingPermissions(false);
+        },
+        (geoErr) => {
+          setPermissionError('Location access denied. Please click the lock icon in your browser address bar and enable Location & Camera.');
+          setAskingPermissions(false);
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    } catch (err) {
+      setPermissionError(err.message || 'Camera permission denied. Please allow camera access to take this exam.');
+      setAskingPermissions(false);
+    }
+  };
+
+  // Trigger violation reporting with debouncing (Phase 8 Anti-Cheat)
+  const reportViolation = async (violationType, defaultReason) => {
+    if (!attempt || attempt.status !== 'in_progress') return;
+    const now = Date.now();
+    // Debounce violation reports within 2 seconds
+    if (now - lastViolationTimeRef.current < 2000) return;
+    lastViolationTimeRef.current = now;
+
+    try {
+      const res = await API.post(`/exams/attempts/${attempt._id}/violation`, {
+        type: violationType,
+        reason: defaultReason,
+        deviceInfo: {
+          userAgent: navigator.userAgent,
+          screenResolution: `${window.screen.width}x${window.screen.height}`,
+        },
+      });
+
+      if (res.data?.success) {
+        setTabSwitchCount(res.data.warningCount);
+        setMaxWarnings(res.data.maxWarnings || 3);
+        setViolationMessage(
+          res.data.autoSubmitted
+            ? 'You have exceeded the maximum warning limit. Your exam was automatically submitted.'
+            : `Warning ${res.data.warningCount} of ${res.data.maxWarnings}: ${defaultReason}`
+        );
         setShowTabWarning(true);
-        try {
-          await API.post('/exams/tab-switch', {
-            attemptId: attempt._id,
-            reason: 'Tab switch / focus lost event',
-          });
-        } catch (e) {
-          console.warn('Failed to record tab switch:', e.message);
+
+        if (res.data.autoSubmitted) {
+          if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+          if (timerRef.current) clearInterval(timerRef.current);
+          window.alert('Maximum warnings reached. Your examination has been automatically submitted.');
+          navigate(`/exams/${id}/results`);
         }
+      }
+    } catch (err) {
+      console.warn('Failed to report violation:', err.message);
+    }
+  };
+
+  // 3. Tab Visibility, Window Blur, Fullscreen & Shortcut Anti-Cheat Listeners
+  useEffect(() => {
+    if (!attempt || attempt.status !== 'in_progress') return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        reportViolation('tab_switch', 'You switched browser tabs or minimized the window.');
       }
     };
 
+    const handleWindowBlur = () => {
+      reportViolation('window_blur', 'Exam window lost focus. Please stay on the examination screen.');
+    };
+
+    const handleFullscreenExit = () => {
+      if (!document.fullscreenElement) {
+        setIsFullscreen(false);
+        reportViolation('fullscreen_exit', 'You exited full-screen mode.');
+      }
+    };
+
+    const handleKeyDown = (e) => {
+      // Prevent dev tools, copy, paste, print shortcuts
+      if (
+        (e.ctrlKey && ['c', 'v', 'x', 'p', 's', 'u', 'a'].includes(e.key.toLowerCase())) ||
+        (e.metaKey && ['c', 'v', 'x', 'p', 's', 'u', 'a'].includes(e.key.toLowerCase())) ||
+        ['F12'].includes(e.key)
+      ) {
+        e.preventDefault();
+        reportViolation('restricted_shortcut', `Restricted key combination attempted (${e.key.toUpperCase()}).`);
+      }
+    };
+
+    const handleContextMenu = (e) => {
+      e.preventDefault();
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [exam, attempt]);
+    window.addEventListener('blur', handleWindowBlur);
+    document.addEventListener('fullscreenchange', handleFullscreenExit);
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('contextmenu', handleContextMenu);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('blur', handleWindowBlur);
+      document.removeEventListener('fullscreenchange', handleFullscreenExit);
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('contextmenu', handleContextMenu);
+    };
+  }, [attempt]);
 
   // 4. Background Heartbeat Ping (Every 15s to maintain live status)
   useEffect(() => {
     if (!attempt || attempt.status !== 'in_progress') return;
 
-    const heartbeatInterval = setInterval(async () => {
+    heartbeatIntervalRef.current = setInterval(async () => {
       try {
         const res = await API.post(`/exams/attempts/${attempt._id}/heartbeat`);
         if (res.data?.timeRemainingSeconds !== undefined) {
-          // Re-sync client timer with authoritative server deadline
           setSecondsRemaining(res.data.timeRemainingSeconds);
+        }
+        if (res.data?.status === 'auto_submitted') {
+          clearInterval(heartbeatIntervalRef.current);
+          window.alert('Your exam session has expired or was submitted by an administrator.');
+          navigate(`/exams/${id}/results`);
         }
       } catch (err) {
         console.warn('Heartbeat ping failed:', err.message);
       }
     }, 15000);
 
-    return () => clearInterval(heartbeatInterval);
+    return () => {
+      if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
+    };
   }, [attempt]);
 
   // Mark current question as visited
@@ -176,7 +340,6 @@ export default function StudentExamInterface() {
   }, [currentQIndex, currentQId]);
 
   // Save current answer incrementally to dedicated AttemptAnswer backend
-  const seqRef = useRef(1);
   const saveAnswerToBackend = async (qId, answerData) => {
     if (!attempt) return;
     setSavingStatus('saving');
@@ -269,16 +432,31 @@ export default function StudentExamInterface() {
     }
   };
 
-  // Final Submission Handler
+  // Final Submission Handler (with network error preservation & retry)
   const handleFinalSubmit = async (isTimeout = false) => {
     if (!attempt) return;
     setLoading(true);
+    setHasNetworkSubmitError(false);
+
+    // Stop heartbeat immediately upon submission
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+
+    // Save snapshot of responses to localStorage as safety backup
+    try {
+      localStorage.setItem(`backup_attempt_${attempt._id}`, JSON.stringify(responses));
+    } catch (_) {}
+
     try {
       const res = await API.post('/exams/submit-attempt', {
         attemptId: attempt._id,
         submissionType: isTimeout ? 'auto_timeout' : 'manual',
       });
       if (res.data?.success) {
+        // Clear local backup once server confirms persistence
+        localStorage.removeItem(`backup_attempt_${attempt._id}`);
         window.alert(
           isTimeout
             ? 'Exam duration has ended. Your responses were automatically submitted.'
@@ -287,7 +465,11 @@ export default function StudentExamInterface() {
         navigate(`/exams/${id}/results`);
       }
     } catch (err) {
-      window.alert(err.response?.data?.message || 'Error submitting exam');
+      setHasNetworkSubmitError(true);
+      window.alert(
+        err.response?.data?.message ||
+        'Network error during submission. Your responses are saved locally. Please click "Retry Submission".'
+      );
     } finally {
       setLoading(false);
     }
@@ -343,7 +525,53 @@ export default function StudentExamInterface() {
   const visitedUnansweredCount = Object.values(responses).filter((r) => r.visited && !r.isAnswered && !r.isMarkedForReview).length;
   const notVisitedCount = questions.length - (answeredCount + markedReviewCount + answeredAndMarkedCount + visitedUnansweredCount);
 
-  if (loading || !currentQ) {
+  // Phase 6 Permission Check Screen
+  if (!permissionGranted) {
+    return (
+      <div className="d-flex align-items-center justify-content-center vh-100 bg-light p-4">
+        <div className="card border-0 shadow-lg rounded-4 p-4 text-center" style={{ maxWidth: '540px' }}>
+          <div className="mb-3 text-primary">
+            <Camera size={48} className="mx-auto" />
+          </div>
+          <h4 className="fw-bold text-dark mb-2">Device & Integrity Verification</h4>
+          <p className="text-muted small mb-4">
+            This examination is conducted under real-time proctoring. You must grant access to your <strong>Camera</strong> and <strong>Geolocation</strong> before the examination paper can be unlocked.
+          </p>
+
+          {permissionError && (
+            <div className="alert alert-danger text-start small mb-3">
+              <AlertTriangle size={16} className="inline me-2 text-danger" />
+              {permissionError}
+              <div className="mt-2 text-dark fw-semibold">How to allow:</div>
+              <ol className="ps-3 mb-0 text-muted" style={{ fontSize: '0.8rem' }}>
+                <li>Click the tune/lock icon in your browser URL bar.</li>
+                <li>Set "Camera" and "Location" to <strong>Allow</strong>.</li>
+                <li>Click "Grant Permissions & Start" below.</li>
+              </ol>
+            </div>
+          )}
+
+          <div className="d-flex flex-column gap-2">
+            <button
+              className="btn btn-primary fw-bold py-2 rounded-3"
+              onClick={requestMediaAndLocationPermissions}
+              disabled={askingPermissions}
+            >
+              {askingPermissions ? 'Checking Device Access...' : 'Grant Permissions & Start Exam'}
+            </button>
+            <button
+              className="btn btn-outline-secondary btn-sm rounded-3"
+              onClick={() => navigate('/exams')}
+            >
+              Return to Exam List
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading) {
     return (
       <div className="d-flex align-items-center justify-content-center vh-100 bg-light">
         <div className="text-center">
@@ -355,11 +583,57 @@ export default function StudentExamInterface() {
     );
   }
 
+  if (initError) {
+    return (
+      <div className="d-flex align-items-center justify-content-center vh-100 bg-light p-4">
+        <div className="card border-0 shadow-lg rounded-4 p-4 text-center" style={{ maxWidth: '480px' }}>
+          <AlertTriangle size={48} className="text-danger mx-auto mb-3" />
+          <h5 className="fw-bold text-dark">Unable to Load Examination</h5>
+          <p className="text-muted small mb-4">{initError}</p>
+          <div className="d-flex justify-content-center gap-2">
+            <button className="btn btn-primary px-4 rounded-3" onClick={initExam}>
+              Retry
+            </button>
+            <button className="btn btn-outline-secondary px-4 rounded-3" onClick={() => navigate('/exams')}>
+              Back to Exams
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentQ) {
+    return (
+      <div className="d-flex align-items-center justify-content-center vh-100 bg-light p-4">
+        <div className="card border-0 shadow-lg rounded-4 p-4 text-center" style={{ maxWidth: '480px' }}>
+          <AlertTriangle size={48} className="text-warning mx-auto mb-3" />
+          <h5 className="fw-bold text-dark">No Questions Found</h5>
+          <p className="text-muted small mb-4">This examination does not currently contain any questions.</p>
+          <button className="btn btn-primary px-4 rounded-3 mx-auto" onClick={() => navigate('/exams')}>
+            Return to Exam Hub
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const currentResp = responses[currentQId] || {};
   const isTimeCritical = secondsRemaining < 300; // Under 5 mins
 
   return (
     <div style={{ backgroundColor: '#f1f5f9', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+
+      {/* Top Banner Notice when Resuming Exam */}
+      {resumedNotice && (
+        <div className="bg-primary text-white py-2 px-4 d-flex justify-content-between align-items-center shadow-sm small">
+          <div className="d-flex align-items-center gap-2">
+            <CheckCircle2 size={16} />
+            <span>Welcome back, your examination session has been resumed safely with your remaining server time.</span>
+          </div>
+          <button className="btn-close btn-close-white" style={{ transform: 'scale(0.8)' }} onClick={() => setResumedNotice(false)} />
+        </div>
+      )}
 
       {/* 1. TOP SECURE EXAM HEADER */}
       <header className="bg-white border-bottom px-4 py-2 d-flex justify-content-between align-items-center shadow-sm">
@@ -375,8 +649,15 @@ export default function StudentExamInterface() {
           </div>
         </div>
 
-        {/* Center: Authoritative Countdown Timer */}
+        {/* Center: Authoritative Countdown Timer & Warning Badge */}
         <div className="d-flex align-items-center gap-2">
+          {tabSwitchCount > 0 && (
+            <span className={`badge px-3 py-2 rounded-pill fw-bold ${tabSwitchCount >= maxWarnings ? 'bg-danger text-white' : 'bg-warning text-dark'}`}>
+              <ShieldAlert size={14} className="inline me-1" />
+              Warnings: {tabSwitchCount}/{maxWarnings}
+            </span>
+          )}
+
           <div
             className={`d-flex align-items-center gap-2 px-3 py-1 rounded-pill fw-bold font-monospace shadow-sm ${
               isTimeCritical ? 'bg-danger text-white animate-pulse' : 'bg-dark text-white'
@@ -435,6 +716,11 @@ export default function StudentExamInterface() {
               <span className="text-muted small fw-semibold">of {questions.length}</span>
               <span className="badge bg-light text-dark border ms-2 text-uppercase">{currentQ.sectionTitle}</span>
               <span className="badge bg-secondary-subtle text-secondary text-uppercase">{currentQ.questionType?.replace('_', ' ')}</span>
+              {exam.status === 'live' && (
+                <span className="badge bg-danger text-white d-flex align-items-center gap-1">
+                  <span className="spinner-grow spinner-grow-sm" style={{ width: 6, height: 6 }} /> LIVE
+                </span>
+              )}
             </div>
 
             <div className="d-flex align-items-center gap-2">
@@ -730,6 +1016,16 @@ export default function StudentExamInterface() {
             </div>
           </div>
 
+          {/* Live Proctoring Camera Feed */}
+          <div className="mb-3 p-2 bg-white rounded-3 border">
+            <div className="d-flex align-items-center justify-content-between mb-2">
+              <span className="small fw-bold text-dark d-flex align-items-center gap-1">
+                <Camera size={14} className="text-primary" /> Live Proctoring
+              </span>
+            </div>
+            <CameraProctor mode="during_exam" required={false} showPreview={true} />
+          </div>
+
           <hr className="my-2 opacity-25" />
 
           {/* Question Grid Buttons */}
@@ -862,24 +1158,54 @@ export default function StudentExamInterface() {
         </div>
       )}
 
-      {/* 4. ANTI-CHEAT TAB SWITCH WARNING MODAL */}
+      {/* 4. ANTI-CHEAT TAB SWITCH & VIOLATION WARNING MODAL */}
       {showTabWarning && (
         <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 1070 }}>
           <div className="modal-dialog modal-dialog-centered">
             <div className="modal-content border-0 rounded-4 shadow">
               <div className="modal-body p-4 text-center">
                 <ShieldAlert size={48} className="text-danger mx-auto mb-2" />
-                <h5 className="fw-bold text-dark">Warning: Window Focus Lost!</h5>
+                <h5 className="fw-bold text-dark">Warning: Integrity Event Detected</h5>
                 <p className="text-secondary small mb-3">
-                  You have switched tabs or minimized the examination window (Warning {tabSwitchCount} of {exam.tabSwitchLimit || 3}).
-                  This event has been logged to your examination audit trail.
+                  {violationMessage || `You left the exam screen. Warning ${tabSwitchCount} of ${maxWarnings}.`}
                 </p>
+                <div className="alert alert-danger small text-start mb-3">
+                  Exceeding {maxWarnings} warnings will immediately terminate your session and automatically submit your responses.
+                </div>
                 <button
                   type="button"
                   className="btn btn-primary px-4 fw-semibold rounded-3"
-                  onClick={() => setShowTabWarning(false)}
+                  onClick={() => {
+                    setShowTabWarning(false);
+                    if (!document.fullscreenElement) {
+                      document.documentElement.requestFullscreen().catch(() => {});
+                    }
+                  }}
                 >
-                  I Understand, Return to Test
+                  Return to Exam Screen
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. NETWORK SUBMIT ERROR RETRY MODAL */}
+      {hasNetworkSubmitError && (
+        <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 1080 }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content border-0 rounded-4 shadow text-center p-4">
+              <AlertTriangle size={48} className="text-warning mx-auto mb-2" />
+              <h5 className="fw-bold text-dark">Network Issue Encountered</h5>
+              <p className="text-muted small mb-3">
+                We could not contact the server, but <strong>all your answers are preserved safely on this device</strong>. Please check your internet connection and click retry.
+              </p>
+              <div className="d-flex justify-content-center gap-2">
+                <button
+                  className="btn btn-primary px-4 fw-bold rounded-3"
+                  onClick={() => handleFinalSubmit(false)}
+                >
+                  Retry Submission Now
                 </button>
               </div>
             </div>

@@ -21,8 +21,8 @@ router.post('/setup-superadmin', setupSuperAdmin);
 // Current user profile
 router.get('/me', protect, getCurrentUser);
 
-// Faculty / Teachers
-router.get('/teachers', protect, getTeachers);
+// Faculty / Teachers Directory
+router.get('/teachers', protect, authorize('superadmin', 'principal', 'admin', 'teacher'), getTeachers);
 router.post(
   '/add-teacher',
   protect,
@@ -37,8 +37,8 @@ router.put(
   assignTeacherClasses
 );
 
-// Students
-router.get('/students', protect, getStudents);
+// Students Directory
+router.get('/students', protect, authorize('superadmin', 'principal', 'admin', 'teacher'), getStudents);
 router.post(
   '/add-student',
   protect,

@@ -46,6 +46,13 @@ export default function QuestionPaperBuilder() {
   const [showPreviewModal, setShowPreviewModal] = useState(false);
   const [previewShowKeys, setPreviewShowKeys] = useState(false);
 
+  // Bulk Import with Preview State
+  const [importFile, setImportFile] = useState(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
+  const [importPreviewData, setImportPreviewData] = useState(null);
+  const [isDragOver, setIsDragOver] = useState(false);
+
   // Bank search & selection
   const [bankQuestions, setBankQuestions] = useState([]);
   const [bankLoading, setBankLoading] = useState(false);
@@ -1152,67 +1159,287 @@ export default function QuestionPaperBuilder() {
         )}
 
         {/* ------------------------------------------------------------- */}
-        {/* MODAL 4: CSV / JSON IMPORT                                     */}
+        {/* MODAL 4: UNIVERSAL BULK IMPORT WITH LIVE PREVIEW TABLE         */}
         {/* ------------------------------------------------------------- */}
         {showImportModal && (
           <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1050 }}>
-            <div className="modal-dialog">
+            <div className="modal-dialog modal-xl modal-dialog-scrollable">
               <div className="modal-content border-0 rounded-4 shadow">
-                <div className="modal-header border-bottom">
-                  <h5 className="modal-title fw-bold text-dark">Import Questions</h5>
-                  <button className="btn-close" onClick={() => setShowImportModal(false)} />
+                <div className="modal-header border-bottom bg-light">
+                  <div className="d-flex align-items-center gap-2">
+                    <Upload size={20} className="text-primary" />
+                    <h5 className="modal-title fw-bold text-dark mb-0">Import Questions from Document / Sheet</h5>
+                  </div>
+                  <button className="btn-close" onClick={() => { setShowImportModal(false); setImportPreviewData(null); }} />
                 </div>
                 <div className="modal-body p-4">
-                  <p className="small text-muted mb-3">
-                    Upload a standardized CSV or JSON questions file to bulk-populate this section.
-                  </p>
-                  <input
-                    type="file"
-                    accept=".csv, .json"
-                    className="form-control form-control-sm mb-3"
-                    onChange={(e) => {
-                      const file = e.target.files[0];
-                      if (!file) return;
-                      const reader = new FileReader();
-                      reader.onload = (event) => {
-                        try {
-                          const parsed = JSON.parse(event.target.result);
-                          if (Array.isArray(parsed)) {
-                            const updated = [...sections];
-                            updated[activeSectionIdx].questions.push(...parsed);
-                            setSections(updated);
-                            setShowImportModal(false);
-                            alert(`Imported ${parsed.length} questions successfully!`);
+                  {/* Step 1: Upload & Templates */}
+                  {!importPreviewData ? (
+                    <div>
+                      <div className="d-flex justify-content-between align-items-center mb-3">
+                        <span className="small text-muted">Supports PDF, Excel (.xlsx, .xls), and CSV spreadsheets with automatic Q&A separation.</span>
+                        <div className="d-flex gap-2">
+                          <a
+                            href={`${API.defaults.baseURL || '/api'}/questions/template?format=csv`}
+                            download="Question_Import_Template.csv"
+                            className="btn btn-outline-secondary btn-sm rounded-3 d-flex align-items-center gap-1"
+                          >
+                            <Download size={14} /> CSV Template
+                          </a>
+                          <a
+                            href={`${API.defaults.baseURL || '/api'}/questions/template?format=xlsx`}
+                            download="Question_Import_Template.xlsx"
+                            className="btn btn-outline-secondary btn-sm rounded-3 d-flex align-items-center gap-1"
+                          >
+                            <Download size={14} /> Excel Template
+                          </a>
+                        </div>
+                      </div>
+
+                      {/* Drag & Drop Zone */}
+                      <div
+                        onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+                        onDragLeave={() => setIsDragOver(false)}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          setIsDragOver(false);
+                          if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                            setImportFile(e.dataTransfer.files[0]);
                           }
-                        } catch {
-                          alert('Please upload a valid JSON questions array file.');
-                        }
-                      };
-                      reader.readAsText(file);
-                    }}
-                  />
-                  <div className="p-3 bg-light rounded-3 small">
-                    <span className="fw-semibold text-dark d-block mb-1">Standard JSON Format Example:</span>
-                    <pre className="font-monospace text-muted mb-0" style={{ fontSize: '0.72rem' }}>
-{`[
-  {
-    "questionText": "What is the unit of force?",
-    "questionType": "single_mcq",
-    "marks": 2,
-    "options": [
-      { "id": "opt_1", "text": "Newton" },
-      { "id": "opt_2", "text": "Joule" }
-    ],
-    "correctAnswer": "opt_1"
-  }
-]`}
-                    </pre>
-                  </div>
+                        }}
+                        className={`p-5 border-2 rounded-4 text-center cursor-pointer mb-4 ${
+                          isDragOver ? 'border-primary bg-primary-subtle' : 'border-dashed bg-light'
+                        }`}
+                        style={{ borderStyle: 'dashed' }}
+                        onClick={() => document.getElementById('bulk-import-file-input').click()}
+                      >
+                        <input
+                          id="bulk-import-file-input"
+                          type="file"
+                          accept=".pdf, .csv, .xlsx, .xls, .docx"
+                          style={{ display: 'none' }}
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files[0]) {
+                              setImportFile(e.target.files[0]);
+                            }
+                          }}
+                        />
+                        <Upload size={40} className="text-secondary mb-2" />
+                        <h6 className="fw-bold text-dark mb-1">
+                          {importFile ? importFile.name : 'Click to Browse or Drag & Drop File Here'}
+                        </h6>
+                        <p className="text-muted small mb-0">PDF (.pdf), Excel (.xlsx, .xls), or CSV (.csv) up to 15MB</p>
+                      </div>
+
+                      {importLoading && (
+                        <div className="mb-4">
+                          <div className="d-flex justify-content-between small text-muted mb-1">
+                            <span>Parsing question stems, options, and answer keys...</span>
+                            <span>{importProgress}%</span>
+                          </div>
+                          <div className="progress" style={{ height: '8px' }}>
+                            <div
+                              className="progress-bar progress-bar-striped progress-bar-animated bg-primary"
+                              role="progressbar"
+                              style={{ width: `${importProgress}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="d-flex justify-content-end">
+                        <button
+                          type="button"
+                          className="btn btn-primary rounded-3 px-4"
+                          disabled={!importFile || importLoading}
+                          onClick={async () => {
+                            if (!importFile) return;
+                            setImportLoading(true);
+                            setImportProgress(35);
+                            try {
+                              const formData = new FormData();
+                              formData.append('file', importFile);
+                              formData.append('classGrade', exam?.classGrade || 'Class 10');
+                              formData.append('subject', exam?.subject || 'General');
+
+                              setImportProgress(65);
+                              const res = await API.post('/questions/import-preview', formData, {
+                                headers: { 'Content-Type': 'multipart/form-data' },
+                              });
+
+                              setImportProgress(100);
+                              if (res.data?.success) {
+                                setImportPreviewData(res.data);
+                              }
+                            } catch (err) {
+                              window.alert(err.response?.data?.message || err.message || 'Failed to parse file');
+                            } finally {
+                              setImportLoading(false);
+                            }
+                          }}
+                        >
+                          Generate Live Preview
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Step 2: Live Preview Table */
+                    <div>
+                      <div className="d-flex justify-content-between align-items-center mb-3">
+                        <div className="d-flex gap-2 align-items-center">
+                          <span className="badge bg-primary px-3 py-2">
+                            Total Detected: {importPreviewData.totalDetected}
+                          </span>
+                          <span className="badge bg-success-subtle text-success border border-success-subtle px-3 py-2">
+                            Valid: {importPreviewData.validCount}
+                          </span>
+                          {importPreviewData.errorCount > 0 && (
+                            <span className="badge bg-danger-subtle text-danger border border-danger-subtle px-3 py-2">
+                              Errors / Skipped: {importPreviewData.errorCount}
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          className="btn btn-outline-secondary btn-sm"
+                          onClick={() => { setImportPreviewData(null); setImportFile(null); }}
+                        >
+                          Upload Different File
+                        </button>
+                      </div>
+
+                      <div className="table-responsive border rounded-3 mb-3" style={{ maxHeight: '420px' }}>
+                        <table className="table table-hover align-middle mb-0" style={{ fontSize: '0.85rem' }}>
+                          <thead className="table-light sticky-top">
+                            <tr>
+                              <th style={{ width: '40px' }}>#</th>
+                              <th>Question Stem</th>
+                              <th>Type</th>
+                              <th>Options</th>
+                              <th>Correct Key</th>
+                              <th>Marks</th>
+                              <th>Status</th>
+                              <th>Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {importPreviewData.preview?.map((row, idx) => (
+                              <tr key={row.tempId || idx} className={row.hasError ? 'table-danger' : ''}>
+                                <td className="text-muted">{idx + 1}</td>
+                                <td>
+                                  <input
+                                    type="text"
+                                    className="form-control form-control-sm"
+                                    value={row.questionText}
+                                    onChange={(e) => {
+                                      const updatedList = [...importPreviewData.preview];
+                                      updatedList[idx].questionText = e.target.value;
+                                      if (e.target.value.trim().length > 0) {
+                                        updatedList[idx].hasError = false;
+                                        updatedList[idx].errorReason = '';
+                                      }
+                                      setImportPreviewData({ ...importPreviewData, preview: updatedList });
+                                    }}
+                                  />
+                                  {row.hasError && (
+                                    <span className="badge bg-danger mt-1">{row.errorReason}</span>
+                                  )}
+                                </td>
+                                <td>
+                                  <span className="badge bg-light text-dark border text-uppercase">{row.questionType}</span>
+                                </td>
+                                <td>
+                                  {row.options?.length > 0 ? (
+                                    <span className="text-muted">{row.options.length} options</span>
+                                  ) : (
+                                    <span className="text-muted">Descriptive</span>
+                                  )}
+                                </td>
+                                <td>
+                                  <span className="badge bg-success-subtle text-success">{row.correctAnswer}</span>
+                                </td>
+                                <td style={{ width: '70px' }}>
+                                  <input
+                                    type="number"
+                                    className="form-control form-control-sm text-center"
+                                    value={row.marks}
+                                    onChange={(e) => {
+                                      const updatedList = [...importPreviewData.preview];
+                                      updatedList[idx].marks = Number(e.target.value);
+                                      setImportPreviewData({ ...importPreviewData, preview: updatedList });
+                                    }}
+                                  />
+                                </td>
+                                <td>
+                                  {row.hasError ? (
+                                    <span className="badge bg-danger">Invalid</span>
+                                  ) : (
+                                    <span className="badge bg-success">Ready</span>
+                                  )}
+                                </td>
+                                <td>
+                                  <button
+                                    className="btn btn-outline-danger btn-sm p-1"
+                                    onClick={() => {
+                                      const updatedList = importPreviewData.preview.filter((_, i) => i !== idx);
+                                      setImportPreviewData({
+                                        ...importPreviewData,
+                                        preview: updatedList,
+                                        totalDetected: updatedList.length,
+                                        validCount: updatedList.filter((q) => !q.hasError).length,
+                                        errorCount: updatedList.filter((q) => q.hasError).length,
+                                      });
+                                    }}
+                                  >
+                                    <Trash2 size={14} />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <div className="modal-footer border-top">
-                  <button type="button" className="btn btn-outline-secondary" onClick={() => setShowImportModal(false)}>
-                    Close
+                <div className="modal-footer border-top bg-light">
+                  <button
+                    type="button"
+                    className="btn btn-outline-secondary"
+                    onClick={() => { setShowImportModal(false); setImportPreviewData(null); }}
+                  >
+                    Cancel
                   </button>
+                  {importPreviewData && (
+                    <button
+                      type="button"
+                      className="btn btn-success fw-bold px-4"
+                      disabled={importPreviewData.validCount === 0 || importLoading}
+                      onClick={async () => {
+                        const validToImport = importPreviewData.preview.filter((q) => !q.hasError && q.questionText.trim());
+                        if (validToImport.length === 0) return;
+                        setImportLoading(true);
+                        try {
+                          const res = await API.post('/questions/import-confirm', {
+                            questions: validToImport,
+                            examId: id,
+                            sectionId: activeSec.id,
+                          });
+                          if (res.data?.success) {
+                            window.alert(`Successfully imported ${validToImport.length} questions into ${activeSec.title}!`);
+                            setShowImportModal(false);
+                            setImportPreviewData(null);
+                            fetchExamData();
+                          }
+                        } catch (err) {
+                          window.alert(err.response?.data?.message || err.message || 'Failed to confirm questions');
+                        } finally {
+                          setImportLoading(false);
+                        }
+                      }}
+                    >
+                      Confirm & Import to Exam ({importPreviewData.validCount})
+                    </button>
+                  )}
                 </div>
               </div>
             </div>

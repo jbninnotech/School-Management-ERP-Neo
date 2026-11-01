@@ -32,7 +32,7 @@ const userSchema = new mongoose.Schema(
     },
     role: {
       type: String,
-      enum: ['superadmin', 'admin', 'teacher', 'student'],
+      enum: ['superadmin', 'principal', 'admin', 'teacher', 'student'],
       default: 'teacher',
     },
     profilePhoto: {
@@ -86,7 +86,11 @@ const userSchema = new mongoose.Schema(
 userSchema.pre('validate', function () {
   if (!this.schoolId) {
     const year = new Date().getFullYear();
-    const prefix = this.role === 'teacher' ? 'TEA' : this.role === 'admin' ? 'ADM' : 'STU';
+    let prefix = 'STU';
+    if (this.role === 'teacher') prefix = 'TEA';
+    else if (this.role === 'admin') prefix = 'ADM';
+    else if (this.role === 'principal') prefix = 'PRI';
+    else if (this.role === 'superadmin') prefix = 'SUA';
     const randomDigits = Math.floor(1000 + Math.random() * 9000);
     this.schoolId = `SCH-${prefix}-${year}-${randomDigits}`;
   }

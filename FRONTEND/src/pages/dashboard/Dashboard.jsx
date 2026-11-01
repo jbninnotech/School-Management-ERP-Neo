@@ -21,11 +21,17 @@ import {
   Activity,
   Layers,
   Sparkles,
-  ChevronRight
+  ChevronRight,
+  Radio,
+  Pause,
+  Play,
+  Square,
+  AlertTriangle
 } from 'lucide-react';
 import API from '../../api/api.js';
 import Sidebar from '../../components/Sidebar.jsx';
 import NotificationBell from '../../components/NotificationBell.jsx';
+import { getSocket } from '../../api/socket.js';
 
 const roleTitles = {
   superadmin: 'Super Admin Dashboard',
@@ -83,6 +89,16 @@ export default function Dashboard() {
   });
   const [schedulingLoading, setSchedulingLoading] = useState(false);
   const [scheduleError, setScheduleError] = useState('');
+
+  // GO LIVE Confirmation Modal
+  const [goLiveExamModal, setGoLiveExamModal] = useState(null);
+  const [goLiveLoading, setGoLiveLoading] = useState(false);
+  const [goLiveError, setGoLiveError] = useState('');
+
+  // Pause Exam Modal
+  const [pauseExamModal, setPauseExamModal] = useState(null);
+  const [pauseReason, setPauseReason] = useState('');
+  const [pauseLoading, setPauseLoading] = useState(false);
 
   // Student Data State
   const [studentData, setStudentData] = useState({
@@ -143,6 +159,31 @@ export default function Dashboard() {
     const pollInterval = setInterval(() => {
       loadDashboardData(true);
     }, 15000);
+
+    // Socket.IO real-time event listener
+    const socket = getSocket();
+    if (socket) {
+      const handleLiveNotification = (notif) => {
+        // Auto-refresh dashboard metrics when an exam goes live, rescheduled, or results out
+        loadDashboardData(true);
+        if (notif?.title) {
+          setActionAlert({
+            type: 'info',
+            message: `${notif.title}: ${notif.message}`,
+          });
+        }
+      };
+
+      socket.on('new_notification', handleLiveNotification);
+      socket.on('exam_monitor_update', () => loadDashboardData(true));
+
+      return () => {
+        clearInterval(pollInterval);
+        socket.off('new_notification', handleLiveNotification);
+        socket.off('exam_monitor_update');
+      };
+    }
+
     return () => clearInterval(pollInterval);
   }, [role]);
 
@@ -209,6 +250,91 @@ export default function Dashboard() {
     }
   };
 
+  // -------------------------------------------------------------
+  // REAL-TIME GO LIVE, PAUSE, RESUME, END ACTIONS
+  // -------------------------------------------------------------
+  const handleOpenGoLiveModal = (exam) => {
+    setGoLiveError('');
+    setGoLiveExamModal(exam);
+  };
+
+  const handleConfirmGoLive = async () => {
+    if (!goLiveExamModal) return;
+    setGoLiveLoading(true);
+    setGoLiveError('');
+    try {
+      const res = await API.post(`/exams/${goLiveExamModal._id}/go-live`);
+      if (res.data?.success) {
+        setActionAlert({
+          type: 'success',
+          message: `🔴 Examination "${goLiveExamModal.title}" is now LIVE! Eligible students have been notified.`,
+        });
+        const liveExamId = goLiveExamModal._id;
+        setGoLiveExamModal(null);
+        loadDashboardData(true);
+        // Step 13: Navigate directly to Live Exam Monitoring dashboard
+        navigate(`/exams/${liveExamId}/monitor`);
+      }
+    } catch (err) {
+      setGoLiveError(err.response?.data?.message || 'Failed to activate examination. Verify approval and questions.');
+    } finally {
+      setGoLiveLoading(false);
+    }
+  };
+
+  const handlePauseExam = async () => {
+    if (!pauseExamModal) return;
+    setPauseLoading(true);
+    try {
+      const res = await API.post(`/exams/${pauseExamModal._id}/pause`, { reason: pauseReason });
+      if (res.data?.success) {
+        setActionAlert({
+          type: 'warning',
+          message: `Examination "${pauseExamModal.title}" is PAUSED. Student timers and sessions are on hold.`,
+        });
+        setPauseExamModal(null);
+        setPauseReason('');
+        loadDashboardData(true);
+      }
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to pause examination.');
+    } finally {
+      setPauseLoading(false);
+    }
+  };
+
+  const handleResumeExam = async (exam) => {
+    if (!window.confirm(`Resume examination "${exam.title}" now? Students will be notified and allowed to continue.`)) return;
+    try {
+      const res = await API.post(`/exams/${exam._id}/resume`);
+      if (res.data?.success) {
+        setActionAlert({
+          type: 'success',
+          message: `Examination "${exam.title}" has RESUMED! Student deadlines extended.`,
+        });
+        loadDashboardData(true);
+      }
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to resume examination.');
+    }
+  };
+
+  const handleEndExam = async (exam) => {
+    if (!window.confirm(`⚠️ Are you sure you want to officially END "${exam.title}"? All in-progress student attempts will be auto-submitted immediately.`)) return;
+    try {
+      const res = await API.post(`/exams/${exam._id}/end`);
+      if (res.data?.success) {
+        setActionAlert({
+          type: 'info',
+          message: `Examination "${exam.title}" has CONCLUDED. All student attempts are finalized.`,
+        });
+        loadDashboardData(true);
+      }
+    } catch (err) {
+      alert(err.response?.data?.message || 'Failed to end examination.');
+    }
+  };
+
   const handlePublishExam = async (exam) => {
     if (!window.confirm(`Are you sure you want to officially publish "${exam.title}"? Students will receive notifications.`)) {
       return;
@@ -248,9 +374,13 @@ export default function Dashboard() {
   // Filter Teacher Exams
   const filteredTeacherExams = useMemo(() => {
     return (teacherData.recentExams || []).filter((exam) => {
+      if (teacherTab === 'draft' && exam.status !== 'draft') return false;
+      if (teacherTab === 'pending_approval' && !['submitted_for_review', 'under_review'].includes(exam.status)) return false;
+      if (teacherTab === 'approved' && exam.status !== 'approved') return false;
       if (teacherTab === 'scheduled' && !['scheduled', 'published'].includes(exam.status)) return false;
-      if (teacherTab === 'in_progress' && exam.status !== 'in_progress') return false;
-      if (teacherTab === 'draft' && !['draft', 'submitted_for_review'].includes(exam.status)) return false;
+      if (teacherTab === 'ready_to_launch' && exam.status !== 'ready_to_launch' && !(exam.status === 'scheduled' && (!exam.startTime || new Date() >= new Date(exam.startTime)))) return false;
+      if (teacherTab === 'in_progress' && !['live', 'in_progress'].includes(exam.status)) return false;
+      if (teacherTab === 'paused' && exam.status !== 'paused') return false;
       if (teacherTab === 'completed' && !['completed', 'results_published'].includes(exam.status)) return false;
 
       if (teacherSearch) {
@@ -972,30 +1102,54 @@ export default function Dashboard() {
                   All ({teacherData.recentExams.length})
                 </button>
                 <button
+                  className={`btn btn-sm rounded-pill px-3 py-1 fw-semibold ${teacherTab === 'draft' ? 'btn-secondary text-white shadow-sm' : 'btn-light border text-muted'}`}
+                  onClick={() => setTeacherTab('draft')}
+                >
+                  Draft ({teacherData.summaryCards?.draftExams || 0})
+                </button>
+                <button
+                  className={`btn btn-sm rounded-pill px-3 py-1 fw-semibold ${teacherTab === 'pending_approval' ? 'btn-warning text-dark shadow-sm' : 'btn-light border text-muted'}`}
+                  onClick={() => setTeacherTab('pending_approval')}
+                >
+                  Pending Approval ({teacherData.summaryCards?.pendingApprovalExams || 0})
+                </button>
+                <button
+                  className={`btn btn-sm rounded-pill px-3 py-1 fw-semibold ${teacherTab === 'approved' ? 'btn-info text-white shadow-sm' : 'btn-light border text-muted'}`}
+                  onClick={() => setTeacherTab('approved')}
+                >
+                  Approved ({teacherData.summaryCards?.approvedExams || 0})
+                </button>
+                <button
                   className={`btn btn-sm rounded-pill px-3 py-1 fw-semibold ${teacherTab === 'scheduled' ? 'btn-primary text-white shadow-sm' : 'btn-light border text-muted'}`}
                   style={teacherTab === 'scheduled' ? { backgroundColor: '#2563eb', border: 'none' } : {}}
                   onClick={() => setTeacherTab('scheduled')}
                 >
-                  Scheduled ({teacherData.summaryCards.scheduledExams})
+                  Scheduled ({teacherData.summaryCards?.scheduledExams || 0})
+                </button>
+                <button
+                  className={`btn btn-sm rounded-pill px-3 py-1 fw-semibold ${teacherTab === 'ready_to_launch' ? 'btn-danger text-white shadow-sm' : 'btn-light border text-muted'}`}
+                  onClick={() => setTeacherTab('ready_to_launch')}
+                >
+                  Ready to Launch ({teacherData.summaryCards?.readyToLaunchExams || 0})
                 </button>
                 <button
                   className={`btn btn-sm rounded-pill px-3 py-1 fw-semibold ${teacherTab === 'in_progress' ? 'btn-success text-white shadow-sm' : 'btn-light border text-muted'}`}
                   style={teacherTab === 'in_progress' ? { backgroundColor: '#059669', border: 'none' } : {}}
                   onClick={() => setTeacherTab('in_progress')}
                 >
-                  Live ({teacherData.summaryCards.liveExams})
+                  🔴 Live ({teacherData.summaryCards?.liveExams || 0})
                 </button>
                 <button
-                  className={`btn btn-sm rounded-pill px-3 py-1 fw-semibold ${teacherTab === 'draft' ? 'btn-secondary text-white shadow-sm' : 'btn-light border text-muted'}`}
-                  onClick={() => setTeacherTab('draft')}
+                  className={`btn btn-sm rounded-pill px-3 py-1 fw-semibold ${teacherTab === 'paused' ? 'btn-warning text-dark shadow-sm' : 'btn-light border text-muted'}`}
+                  onClick={() => setTeacherTab('paused')}
                 >
-                  Drafts ({teacherData.summaryCards.draftExams})
+                  Paused ({teacherData.summaryCards?.pausedExams || 0})
                 </button>
                 <button
                   className={`btn btn-sm rounded-pill px-3 py-1 fw-semibold ${teacherTab === 'completed' ? 'btn-dark text-white shadow-sm' : 'btn-light border text-muted'}`}
                   onClick={() => setTeacherTab('completed')}
                 >
-                  Completed ({teacherData.summaryCards.completedExams})
+                  Completed ({teacherData.summaryCards?.completedExams || 0})
                 </button>
               </div>
 
@@ -1151,6 +1305,57 @@ export default function Dashboard() {
                             </td>
                             <td className="text-end">
                               <div className="btn-group btn-group-sm">
+                                {/* GO LIVE BUTTON */}
+                                {['approved', 'scheduled', 'ready_to_launch'].includes(exam.status) && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-danger fw-bold d-flex align-items-center gap-1 shadow-sm"
+                                    title="Click to Activate Examination and Launch for Students"
+                                    onClick={() => handleOpenGoLiveModal(exam)}
+                                  >
+                                    <Radio size={13} className="text-white" /> GO LIVE
+                                  </button>
+                                )}
+
+                                {/* PAUSE BUTTON */}
+                                {['live', 'in_progress'].includes(exam.status) && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-warning text-dark fw-bold d-flex align-items-center gap-1"
+                                    title="Pause active examination"
+                                    onClick={() => {
+                                      setPauseExamModal(exam);
+                                      setPauseReason('');
+                                    }}
+                                  >
+                                    <Pause size={13} /> Pause
+                                  </button>
+                                )}
+
+                                {/* RESUME BUTTON */}
+                                {exam.status === 'paused' && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-success fw-bold d-flex align-items-center gap-1"
+                                    title="Resume examination"
+                                    onClick={() => handleResumeExam(exam)}
+                                  >
+                                    <Play size={13} /> Resume
+                                  </button>
+                                )}
+
+                                {/* END EXAM BUTTON */}
+                                {['live', 'in_progress', 'paused'].includes(exam.status) && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-dark d-flex align-items-center gap-1"
+                                    title="Conclude examination and finalize attempts"
+                                    onClick={() => handleEndExam(exam)}
+                                  >
+                                    <Square size={13} /> End
+                                  </button>
+                                )}
+
                                 <button
                                   type="button"
                                   className="btn btn-outline-secondary"
@@ -1160,7 +1365,7 @@ export default function Dashboard() {
                                   Builder
                                 </button>
 
-                                {!['in_progress', 'completed'].includes(exam.status) && (
+                                {!['live', 'in_progress', 'completed', 'paused'].includes(exam.status) && (
                                   <button
                                     type="button"
                                     className="btn btn-outline-primary"
@@ -1171,18 +1376,7 @@ export default function Dashboard() {
                                   </button>
                                 )}
 
-                                {exam.status === 'draft' && (
-                                  <button
-                                    type="button"
-                                    className="btn btn-outline-success"
-                                    title="Publish Exam"
-                                    onClick={() => handlePublishExam(exam)}
-                                  >
-                                    Publish
-                                  </button>
-                                )}
-
-                                {['scheduled', 'published', 'in_progress'].includes(exam.status) && (
+                                {['scheduled', 'published', 'in_progress', 'live', 'paused'].includes(exam.status) && (
                                   <button
                                     type="button"
                                     className="btn btn-outline-info"
@@ -1190,6 +1384,17 @@ export default function Dashboard() {
                                     onClick={() => navigate(`/exams/${exam._id}/monitor`)}
                                   >
                                     Monitor
+                                  </button>
+                                )}
+
+                                {['completed', 'results_published'].includes(exam.status) && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-success"
+                                    title="View Analytics"
+                                    onClick={() => navigate(`/exams/${exam._id}/analytics`)}
+                                  >
+                                    Analytics
                                   </button>
                                 )}
 
@@ -1557,6 +1762,129 @@ export default function Dashboard() {
                       <Award size={16} /> View Scorecard
                     </button>
                   )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* MODAL 3: GO LIVE CONFIRMATION MODAL                           */}
+        {/* ------------------------------------------------------------- */}
+        {goLiveExamModal && (
+          <div className="modal fade show d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(3px)' }}>
+            <div className="modal-dialog modal-dialog-centered m-2 m-sm-auto" style={{ maxWidth: '540px' }}>
+              <div className="modal-content rounded-4 border-0 shadow">
+                <div className="modal-header border-bottom p-3 p-md-4 bg-danger bg-opacity-10">
+                  <div className="d-flex align-items-center gap-2">
+                    <span className="p-2 rounded-circle bg-danger text-white d-flex align-items-center justify-content-center" style={{ width: 36, height: 36 }}>
+                      <Radio size={20} />
+                    </span>
+                    <div>
+                      <h5 className="modal-title fw-bold text-dark mb-0">Confirm Go Live</h5>
+                      <span className="text-muted small">Activate Online Examination Now</span>
+                    </div>
+                  </div>
+                  <button type="button" className="btn-close" onClick={() => setGoLiveExamModal(null)} />
+                </div>
+
+                <div className="modal-body p-3 p-md-4">
+                  {goLiveError && (
+                    <div className="alert alert-danger border-0 rounded-3 mb-3 small d-flex align-items-center gap-2">
+                      <AlertTriangle size={16} />
+                      <span>{goLiveError}</span>
+                    </div>
+                  )}
+
+                  <div className="p-3 bg-light rounded-3 mb-3 border">
+                    <h6 className="fw-bold text-dark mb-2">{goLiveExamModal.title}</h6>
+                    <div className="row g-2 small text-secondary">
+                      <div className="col-6">Subject: <strong className="text-dark">{goLiveExamModal.subject}</strong></div>
+                      <div className="col-6">Class/Sec: <strong className="text-dark">{goLiveExamModal.classGrade} ({goLiveExamModal.sections?.join(', ') || 'All'})</strong></div>
+                      <div className="col-6">Duration: <strong className="text-dark">{goLiveExamModal.durationMinutes} mins</strong></div>
+                      <div className="col-6">Total Marks: <strong className="text-dark">{goLiveExamModal.totalMarks}</strong></div>
+                      <div className="col-12 mt-2 pt-2 border-top">
+                        Eligible Students: <strong className="text-primary">{goLiveExamModal.eligibleCount || 'Registered Students'}</strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="alert alert-warning border-0 rounded-3 small mb-0 d-flex align-items-start gap-2">
+                    <AlertTriangle size={18} className="text-warning-emphasis flex-shrink-0 mt-1" />
+                    <div>
+                      <strong>What happens when you click Confirm Go Live?</strong>
+                      <ul className="mb-0 ps-3 mt-1 text-secondary">
+                        <li>The exam status immediately becomes <strong>LIVE</strong>.</li>
+                        <li>All eligible students receive real-time push notifications.</li>
+                        <li>The exam unlocks on their student dashboards under <em>Available Now</em>.</li>
+                        <li>You will be redirected to the Live Proctoring & Monitoring screen.</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="modal-footer border-top p-3 d-flex justify-content-between">
+                  <button type="button" className="btn btn-light rounded-3 px-3 py-2" onClick={() => setGoLiveExamModal(null)} disabled={goLiveLoading}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-danger rounded-3 d-flex align-items-center gap-2 px-4 py-2 shadow fw-bold"
+                    onClick={handleConfirmGoLive}
+                    disabled={goLiveLoading}
+                  >
+                    {goLiveLoading ? (
+                      <>
+                        <span className="spinner-border spinner-border-sm me-1" /> Activating...
+                      </>
+                    ) : (
+                      <>
+                        <Radio size={16} /> Confirm & Go Live
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* MODAL 4: PAUSE EXAM MODAL                                     */}
+        {/* ------------------------------------------------------------- */}
+        {pauseExamModal && (
+          <div className="modal fade show d-block" tabIndex="-1" style={{ backgroundColor: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(3px)' }}>
+            <div className="modal-dialog modal-dialog-centered m-2 m-sm-auto" style={{ maxWidth: '480px' }}>
+              <div className="modal-content rounded-4 border-0 shadow">
+                <div className="modal-header border-bottom p-3 p-md-4 bg-warning bg-opacity-10">
+                  <h5 className="modal-title fw-bold text-dark mb-0">Pause Examination</h5>
+                  <button type="button" className="btn-close" onClick={() => setPauseExamModal(null)} />
+                </div>
+                <div className="modal-body p-3 p-md-4">
+                  <p className="small text-secondary mb-3">
+                    Pausing <strong>{pauseExamModal.title}</strong> will freeze student countdown timers and temporarily block question answering until resumed.
+                  </p>
+                  <label className="form-label small fw-semibold text-secondary">Reason for Pause *</label>
+                  <input
+                    type="text"
+                    className="form-control rounded-3 py-2 mb-2"
+                    placeholder="e.g. Network latency, Power outage, Audio test"
+                    value={pauseReason}
+                    onChange={(e) => setPauseReason(e.target.value)}
+                  />
+                </div>
+                <div className="modal-footer border-top p-3 d-flex justify-content-between">
+                  <button type="button" className="btn btn-light rounded-3 px-3 py-2" onClick={() => setPauseExamModal(null)}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-warning text-dark rounded-3 px-4 py-2 fw-semibold"
+                    onClick={handlePauseExam}
+                    disabled={pauseLoading}
+                  >
+                    {pauseLoading ? 'Pausing...' : 'Confirm Pause'}
+                  </button>
                 </div>
               </div>
             </div>

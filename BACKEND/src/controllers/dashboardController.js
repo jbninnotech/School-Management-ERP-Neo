@@ -70,8 +70,12 @@ export const getTeacherDashboardStats = async (req, res, next) => {
 
     const totalExams = exams.length;
     const draftExams = exams.filter((e) => e.status === 'draft').length;
+    const pendingApprovalExams = exams.filter((e) => ['submitted_for_review', 'under_review'].includes(e.status)).length;
+    const approvedExams = exams.filter((e) => e.status === 'approved').length;
     const scheduledExams = exams.filter((e) => ['scheduled', 'published'].includes(e.status)).length;
-    const liveExams = exams.filter((e) => e.status === 'in_progress').length;
+    const readyToLaunchExams = exams.filter((e) => e.status === 'ready_to_launch' || (e.status === 'scheduled' && (!e.startTime || new Date() >= new Date(e.startTime)))).length;
+    const liveExams = exams.filter((e) => ['live', 'in_progress'].includes(e.status)).length;
+    const pausedExams = exams.filter((e) => e.status === 'paused').length;
     const completedExams = exams.filter((e) => ['completed', 'results_published'].includes(e.status)).length;
 
     const examIds = exams.map((e) => e._id);
@@ -84,17 +88,27 @@ export const getTeacherDashboardStats = async (req, res, next) => {
       examination: { $in: examIds },
     });
 
-    // Submissions count per exam for recent exams table
+    // Detailed metrics per exam for teacher cards: eligible students, started, submitted
     const recentExamsWithStats = await Promise.all(
-      exams.slice(0, 10).map(async (exam) => {
-        const attemptsCount = await ExaminationAttempt.countDocuments({ examination: exam._id });
-        const pendingCount = await ExaminationAttempt.countDocuments({
-          examination: exam._id,
-          status: 'evaluation_pending',
-        });
+      exams.map(async (exam) => {
+        const studentQuery = { role: 'student', 'studentProfile.classGrade': exam.classGrade };
+        if (exam.sections && exam.sections.length > 0) {
+          studentQuery['studentProfile.section'] = { $in: exam.sections };
+        }
+        const eligibleCount = await User.countDocuments(studentQuery);
+
+        const attempts = await ExaminationAttempt.find({ examination: exam._id }).select('status');
+        const startedCount = attempts.length;
+        const submittedCount = attempts.filter((a) =>
+          ['submitted', 'auto_submitted', 'evaluation_pending', 'evaluated', 'result_published'].includes(a.status)
+        ).length;
+        const pendingCount = attempts.filter((a) => a.status === 'evaluation_pending').length;
+
         return {
           ...exam.toObject(),
-          attemptsCount,
+          eligibleCount,
+          startedCount,
+          submittedCount,
           pendingEvaluationsCount: pendingCount,
         };
       })
@@ -107,8 +121,12 @@ export const getTeacherDashboardStats = async (req, res, next) => {
         summaryCards: {
           totalExams,
           draftExams,
+          pendingApprovalExams,
+          approvedExams,
           scheduledExams,
+          readyToLaunchExams,
           liveExams,
+          pausedExams,
           completedExams,
           pendingEvaluations,
           totalAttempts,
@@ -160,7 +178,21 @@ export const getStudentDashboardStats = async (req, res, next) => {
     // Build query for exams eligible for this student
     const examQuery = {
       classGrade: studentClass,
-      status: { $in: ['scheduled', 'published', 'in_progress', 'completed', 'results_published', 'cancelled'] },
+      status: {
+        $in: [
+          'scheduled',
+          'ready_to_launch',
+          'published',
+          'in_progress',
+          'live',
+          'paused',
+          'resumed',
+          'completed',
+          'evaluation_pending',
+          'results_published',
+          'cancelled',
+        ],
+      },
     };
 
     if (studentSection) {
@@ -227,6 +259,8 @@ export const getStudentDashboardStats = async (req, res, next) => {
 
       if (exam.status === 'cancelled') {
         studentStatus = 'cancelled';
+      } else if (exam.status === 'paused') {
+        studentStatus = 'paused';
       } else if (attempt) {
         if (attempt.status === 'in_progress') {
           // Check if attempt deadline expired
@@ -253,10 +287,14 @@ export const getStudentDashboardStats = async (req, res, next) => {
         // No attempt yet
         if (exam.status === 'completed' || (endTime && now > endTime)) {
           studentStatus = 'missed';
+        } else if (exam.status === 'live' || exam.status === 'in_progress') {
+          // Live now!
+          studentStatus = 'available_now';
+          isAvailableToStart = true;
         } else if (startTime && now < startTime) {
           studentStatus = 'upcoming';
         } else {
-          // Current time is past startTime and before endTime (or no strict window)
+          // Current time is past startTime and before endTime
           studentStatus = 'available_now';
           isAvailableToStart = true;
         }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../../components/Sidebar.jsx';
 import API from '../../api/api.js';
@@ -21,9 +21,13 @@ export default function CreateExamWizard() {
   const navigate = useNavigate();
   const currentUser = JSON.parse(sessionStorage.getItem('user') || '{}');
 
+  const availableSections = ['A', 'B', 'C', 'D', 'E'];
+
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [availablePapers, setAvailablePapers] = useState([]);
+  const [selectedPaperId, setSelectedPaperId] = useState('');
 
   // Form State
   const [formData, setFormData] = useState({
@@ -76,7 +80,22 @@ export default function CreateExamWizard() {
     { num: 4, label: 'Security & Rules', icon: <Shield size={18} /> },
   ];
 
-  const availableSections = ['A', 'B', 'C', 'D', 'Science', 'Commerce', 'Humanities'];
+  // Fetch teacher's question papers matching selected class & subject
+  useEffect(() => {
+    let isMounted = true;
+    const fetchTeacherPapers = async () => {
+      try {
+        const res = await API.get(`/question-papers?classGrade=${encodeURIComponent(formData.classGrade)}`);
+        if (isMounted && res.data?.success) {
+          setAvailablePapers(res.data.data || []);
+        }
+      } catch (_) {}
+    };
+    fetchTeacherPapers();
+    return () => {
+      isMounted = false;
+    };
+  }, [formData.classGrade]);
 
   const handleTextChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -163,6 +182,7 @@ export default function CreateExamWizard() {
 
       const payload = {
         ...formData,
+        questionPaperId: selectedPaperId || undefined,
         startTime: startDateTime,
         endTime: endDateTime,
         totalMarks: Number(formData.totalMarks),
@@ -422,6 +442,42 @@ export default function CreateExamWizard() {
                     value={formData.academicYear}
                     onChange={handleTextChange}
                   />
+                </div>
+
+                {/* Select Master Question Paper */}
+                <div className="col-12">
+                  <div className="p-3 bg-light rounded-3 border">
+                    <label className="form-label small fw-semibold text-dark mb-1">
+                      Link Prepared Question Paper (Optional)
+                    </label>
+                    <p className="text-muted small mb-2">
+                      Attach an existing question paper to automatically snapshot all questions, or leave blank to add questions manually in the next step.
+                    </p>
+                    <select
+                      className="form-select bg-white"
+                      value={selectedPaperId}
+                      onChange={(e) => {
+                        const pId = e.target.value;
+                        setSelectedPaperId(pId);
+                        const chosenPaper = availablePapers.find((p) => p._id === pId);
+                        if (chosenPaper) {
+                          setFormData((prev) => ({
+                            ...prev,
+                            subject: chosenPaper.subject || prev.subject,
+                            totalMarks: chosenPaper.totalMarks || prev.totalMarks,
+                            durationMinutes: chosenPaper.durationMinutes || prev.durationMinutes,
+                          }));
+                        }
+                      }}
+                    >
+                      <option value="">-- Create without a paper (Add questions manually) --</option>
+                      {availablePapers.map((p) => (
+                        <option key={p._id} value={p._id}>
+                          {p.title} ({p.subject} • {p.questions?.length || 0} questions • {p.totalMarks || 0} marks)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 {/* Section Multi-Select Pills */}

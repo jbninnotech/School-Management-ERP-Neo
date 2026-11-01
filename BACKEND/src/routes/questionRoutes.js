@@ -7,6 +7,9 @@ import {
   updateQuestion,
   deleteQuestion,
   importQuestionsFromFile,
+  previewQuestionsFromFile,
+  confirmImportQuestions,
+  getQuestionTemplate,
 } from '../controllers/questionController.js';
 import { protect, authorize } from '../middlewares/authMiddleware.js';
 
@@ -17,6 +20,25 @@ const upload = multer({
 });
 
 const router = Router();
+
+// Templates
+router.get('/template', protect, getQuestionTemplate);
+
+// Preview and Confirm Bulk Import
+router.post(
+  '/import-preview',
+  protect,
+  authorize('superadmin', 'admin', 'teacher'),
+  upload.single('file'),
+  previewQuestionsFromFile
+);
+
+router.post(
+  '/import-confirm',
+  protect,
+  authorize('superadmin', 'admin', 'teacher'),
+  confirmImportQuestions
+);
 
 // General CRUD
 router.get('/', protect, getQuestions);
