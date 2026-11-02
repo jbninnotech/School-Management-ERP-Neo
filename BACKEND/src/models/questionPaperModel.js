@@ -35,6 +35,11 @@ const questionPaperSchema = new mongoose.Schema(
       default: 'SCH-DEFAULT',
       index: true,
     },
+    patternId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ExamPattern',
+      default: null,
+    },
     totalMarks: {
       type: Number,
       default: 0,

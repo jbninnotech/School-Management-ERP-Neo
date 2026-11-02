@@ -10,6 +10,8 @@ import questionRoutes from './routes/questionRoutes.js';
 import academicRoutes from './routes/academicRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import questionPaperRoutes from './routes/questionPaperRoutes.js';
+import uploadRoutes from './routes/uploadRoutes.js';
+import examPatternRoutes from './routes/examPatternRoutes.js';
 
 const app = express();
 
@@ -97,6 +99,12 @@ app.use('/api/v1/notifications', notificationRoutes);
 
 app.use('/api/question-papers', questionPaperRoutes);
 app.use('/api/v1/question-papers', questionPaperRoutes);
+
+app.use('/api/upload', uploadRoutes);
+app.use('/api/v1/upload', uploadRoutes);
+
+app.use('/api/exam-patterns', examPatternRoutes);
+app.use('/api/v1/exam-patterns', examPatternRoutes);
 
 // ─── 404 HANDLER ───────────────────────────────────────────────────────────
 app.use((req, res, next) => {

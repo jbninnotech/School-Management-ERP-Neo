@@ -8,6 +8,14 @@ import {
   getStudents,
   getCurrentUser,
   assignTeacherClasses,
+  updateTeacher,
+  deleteTeacher,
+  restoreTeacher,
+  updateStudent,
+  deleteStudent,
+  restoreStudent,
+  getTeacherQuestionBank,
+  getStudentQuestionPerformance,
 } from '../controllers/authController.js';
 import { protect, authorize } from '../middlewares/authMiddleware.js';
 import { upload } from '../config/cloudinary.js';
@@ -30,6 +38,11 @@ router.post(
   upload.single('profilePhoto'),
   addTeacher
 );
+router.put('/teachers/:id', protect, authorize('superadmin', 'admin'), updateTeacher);
+router.delete('/teachers/:id', protect, authorize('superadmin', 'admin'), deleteTeacher);
+router.put('/teachers/:id/restore', protect, authorize('superadmin', 'admin'), restoreTeacher);
+router.get('/teachers/:id/question-bank', protect, authorize('superadmin', 'principal', 'admin', 'teacher'), getTeacherQuestionBank);
+
 router.put(
   '/assign-teacher/:id',
   protect,
@@ -45,5 +58,9 @@ router.post(
   authorize('superadmin', 'admin', 'teacher'),
   addStudent
 );
+router.put('/students/:id', protect, authorize('superadmin', 'admin', 'teacher'), updateStudent);
+router.delete('/students/:id', protect, authorize('superadmin', 'admin'), deleteStudent);
+router.put('/students/:id/restore', protect, authorize('superadmin', 'admin'), restoreStudent);
+router.get('/students/:id/question-performance', protect, authorize('superadmin', 'principal', 'admin', 'teacher'), getStudentQuestionPerformance);
 
 export default router;

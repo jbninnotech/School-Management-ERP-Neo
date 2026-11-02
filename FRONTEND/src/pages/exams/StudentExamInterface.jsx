@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import API from '../../api/api.js';
 import CameraProctor from '../../components/CameraProctor.jsx';
 import ExamErrorBoundary from '../../components/ExamErrorBoundary.jsx';
+import SafeCalculator from '../../components/SafeCalculator.jsx';
+import RoughWorkPanel from '../../components/RoughWorkPanel.jsx';
 import {
   Clock,
   CheckCircle2,
@@ -19,7 +21,8 @@ import {
   HelpCircle,
   Calculator,
   Camera,
-  Radio
+  Radio,
+  Edit3
 } from 'lucide-react';
 
 export default function StudentExamInterface() {
@@ -43,6 +46,7 @@ export default function StudentExamInterface() {
   const [showTabWarning, setShowTabWarning] = useState(false);
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
   const [showCalculator, setShowCalculator] = useState(false);
+  const [showRoughWork, setShowRoughWork] = useState(false);
   const [calcInput, setCalcInput] = useState('');
   const [calcResult, setCalcResult] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -670,13 +674,21 @@ export default function StudentExamInterface() {
 
           {exam.calculatorAllowed && (
             <button
-              className="btn btn-outline-secondary btn-sm rounded-pill p-2"
+              className={`btn btn-sm rounded-pill p-2 ${showCalculator ? 'btn-primary' : 'btn-outline-secondary'}`}
               onClick={() => setShowCalculator(!showCalculator)}
               title="Open Calculator"
             >
               <Calculator size={18} />
             </button>
           )}
+
+          <button
+            className={`btn btn-sm rounded-pill p-2 ${showRoughWork ? 'btn-primary' : 'btn-outline-secondary'}`}
+            onClick={() => setShowRoughWork(!showRoughWork)}
+            title="Open Rough Work Workspace"
+          >
+            <Edit3 size={18} />
+          </button>
 
           <button
             className="btn btn-outline-secondary btn-sm rounded-pill p-2"
@@ -1064,36 +1076,25 @@ export default function StudentExamInterface() {
 
           {/* Floating On-Screen Calculator */}
           {showCalculator && (
-            <div className="mt-auto p-3 bg-white rounded-3 border shadow-sm">
-              <div className="d-flex justify-content-between align-items-center mb-2">
-                <span className="small fw-bold text-dark">Calculator</span>
-                <button className="btn-close" style={{ transform: 'scale(0.8)' }} onClick={() => setShowCalculator(false)} />
-              </div>
-              <div className="bg-light p-2 rounded text-end font-monospace mb-2" style={{ minHeight: '36px' }}>
-                <div className="small text-muted">{calcInput || '0'}</div>
-                <div className="fw-bold fs-6 text-dark">{calcResult}</div>
-              </div>
-              <div className="row g-1 text-center">
-                {['7','8','9','/','4','5','6','*','1','2','3','-','0','.','=','+'].map((key) => (
-                  <div key={key} className="col-3">
-                    <button
-                      className="btn btn-outline-secondary btn-sm w-100 py-1 font-monospace"
-                      onClick={() => handleCalcClick(key)}
-                    >
-                      {key}
-                    </button>
-                  </div>
-                ))}
-                <div className="col-12 mt-1">
-                  <button className="btn btn-danger btn-sm w-100 py-0" onClick={() => handleCalcClick('C')}>Clear</button>
-                </div>
-              </div>
+            <div className="mt-auto pt-2">
+              <SafeCalculator
+                mode={typeof exam.calculatorAllowed === 'string' ? exam.calculatorAllowed : 'scientific'}
+                onClose={() => setShowCalculator(false)}
+              />
             </div>
           )}
 
         </div>
 
       </div>
+
+      {/* Draggable Rough Work Panel */}
+      {showRoughWork && (
+        <RoughWorkPanel
+          attemptId={attempt?._id}
+          onClose={() => setShowRoughWork(false)}
+        />
+      )}
 
       {/* 3. CONFIRMATION MODAL BEFORE SUBMIT */}
       {showSubmitModal && (

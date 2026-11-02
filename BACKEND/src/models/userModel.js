@@ -39,6 +39,10 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: 'https://res.cloudinary.com/demo/image/upload/v1/avatar.png',
     },
+    photoPublicId: {
+      type: String,
+      default: '',
+    },
     gender: {
       type: String,
       enum: ['Male', 'Female', 'Other', ''],
@@ -73,6 +77,15 @@ const userSchema = new mongoose.Schema(
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    deletedAt: {
+      type: Date,
+      default: null,
     },
     isActive: {
       type: Boolean,

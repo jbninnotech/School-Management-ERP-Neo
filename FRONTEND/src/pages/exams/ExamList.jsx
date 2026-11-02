@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Sidebar from '../../components/Sidebar.jsx';
-import API from '../../api/api.js';
+import examService from '../../services/examService.js';
 import {
   FileCheck2,
   PlusCircle,
@@ -19,7 +19,8 @@ import {
   Filter,
   Sparkles,
   ChevronRight,
-  Layers
+  Layers,
+  Radio
 } from 'lucide-react';
 
 export default function ExamList() {
@@ -38,10 +39,11 @@ export default function ExamList() {
   const fetchExams = async () => {
     setLoading(true);
     try {
-      const res = await API.get('/exams');
-      setExams(res.data?.data || []);
+      const res = await examService.getExams();
+      setExams(res.data || []);
+      setError('');
     } catch (err) {
-      setError(err.response?.data?.message || err.message || 'Failed to load examinations');
+      setError(err.message || 'Failed to load examinations');
     } finally {
       setLoading(false);
     }

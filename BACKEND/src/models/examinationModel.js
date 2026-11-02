@@ -203,6 +203,11 @@ const examinationSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'AssessmentTemplate',
     },
+    patternId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ExamPattern',
+      default: null,
+    },
     gradeBand: {
       type: String,
       enum: ['early_years', 'primary', 'middle', 'secondary', 'senior_secondary'],

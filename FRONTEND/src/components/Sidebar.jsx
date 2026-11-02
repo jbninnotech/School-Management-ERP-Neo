@@ -15,7 +15,8 @@ import {
   CheckSquare,
   BarChart3,
   Award,
-  Bell
+  Bell,
+  Layers
 } from 'lucide-react';
 
 export default function Sidebar({ user }) {
@@ -430,6 +431,18 @@ export default function Sidebar({ user }) {
 
           {canManageExams && (
             <Link
+              to="/exam-patterns"
+              className="sidebar-item-link"
+              style={styles.navLink(isCurrentPath('/exam-patterns'))}
+              onClick={() => setIsMobileOpen(false)}
+            >
+              <Layers className="me-2 text-primary flex-shrink-0" size={16} />
+              <span className="text-truncate">Exam Patterns</span>
+            </Link>
+          )}
+
+          {canManageExams && (
+            <Link
               to="/question-bank"
               className="sidebar-item-link"
               style={styles.navLink(isCurrentPath('/question-bank'))}
@@ -465,15 +478,15 @@ export default function Sidebar({ user }) {
           )}
 
           <Link
-            to="/exams/results"
+            to={role === 'student' ? '/reports/my-report' : '/exams/results'}
             className="sidebar-item-link"
-            style={styles.navLink(isCurrentPath('/exams/results'))}
+            style={styles.navLink(isCurrentPath(role === 'student' ? '/reports/my-report' : '/exams/results'))}
             onClick={() => setIsMobileOpen(false)}
           >
             {role === 'student' ? (
               <>
                 <Award className="me-2 text-warning flex-shrink-0" size={16} />
-                <span className="text-truncate">My Report Card</span>
+                <span className="text-truncate">My Academic Report</span>
               </>
             ) : (
               <>

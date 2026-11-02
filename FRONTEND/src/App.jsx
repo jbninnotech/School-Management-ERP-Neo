@@ -21,6 +21,8 @@ import LiveExamsSection from './pages/exams/LiveExamsSection.jsx';
 import TeacherEvaluation from './pages/exams/TeacherEvaluation.jsx';
 import ExamResultsDashboard from './pages/exams/ExamResultsDashboard.jsx';
 import StudentResultView from './pages/exams/StudentResultView.jsx';
+import StudentReport from './pages/exams/StudentReport.jsx';
+import ExamPatterns from './pages/exams/ExamPatterns.jsx';
 import NotificationPage from './pages/notifications/NotificationPage.jsx';
 
 import ProtectedRoute from './components/ProtectedRoute.jsx';
@@ -140,6 +142,26 @@ export default function App() {
           element={
             <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
               <QuestionPaperList />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Exam Patterns & Blueprints (Package C) */}
+        <Route
+          path="/exam-patterns"
+          element={
+            <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
+              <ExamPatterns />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Student Performance Report (Package E) */}
+        <Route
+          path="/reports/my-report"
+          element={
+            <ProtectedRoute allowedRoles={['student']}>
+              <StudentReport />
             </ProtectedRoute>
           }
         />

@@ -13,6 +13,7 @@ import {
   notifyStudentsExamResumed,
   notifyStudentsExamEnded,
 } from '../services/notificationService.js';
+import { getLiveExamMonitorData } from '../services/liveMonitorService.js';
 import { emitExamMonitorUpdate } from '../server.js';
 
 // Helper: Log audit event
@@ -1981,6 +1982,17 @@ export const getExamAnalytics = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Examination not found' });
     }
 
+    // Role check: Teacher can view analytics for exams they created or classes they teach
+    if (req.user.role === 'teacher') {
+      const isOwner = exam.createdBy.toString() === req.user._id.toString();
+      const isAssigned = (req.user.teacherProfile?.assignedClasses || []).includes(exam.classGrade);
+      if (!isOwner && !isAssigned) {
+        return res.status(403).json({ success: false, message: 'Access denied: You do not teach this exam’s class' });
+      }
+    } else if (req.user.role === 'student') {
+      return res.status(403).json({ success: false, message: 'Access denied: Students cannot access staff exam analytics' });
+    }
+
     const studentQuery = { role: 'student', 'studentProfile.classGrade': exam.classGrade };
     if (exam.sections && exam.sections.length > 0) {
       studentQuery['studentProfile.section'] = { $in: exam.sections };
@@ -2159,7 +2171,6 @@ export const getStudentResult = async (req, res, next) => {
 export const getExamMonitor = async (req, res, next) => {
   try {
     const examId = req.params.examId || req.params.id;
-
     const exam = await Examination.findById(examId);
     if (!exam) {
       return res.status(404).json({
@@ -2168,87 +2179,23 @@ export const getExamMonitor = async (req, res, next) => {
       });
     }
 
-    const studentQuery = { role: 'student', 'studentProfile.classGrade': exam.classGrade };
-    if (exam.sections && exam.sections.length > 0) {
-      studentQuery['studentProfile.section'] = { $in: exam.sections };
+    // Role & Ownership check: Teachers can monitor only their own exams
+    if (req.user.role === 'teacher') {
+      const isOwner = exam.createdBy.toString() === req.user._id.toString();
+      const isAssigned = (req.user.teacherProfile?.assignedClasses || []).includes(exam.classGrade);
+      if (!isOwner && !isAssigned) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied: Teachers can only monitor their own examinations',
+        });
+      }
     }
-    const totalEligible = await User.countDocuments(studentQuery);
 
-    const attempts = await ExaminationAttempt.find({ examination: examId })
-      .populate('student', 'name email schoolId studentProfile')
-      .sort({ updatedAt: -1 });
-
-    const now = Date.now();
-    const HEARTBEAT_WINDOW_MS = 60 * 1000;
-
-    const studentAttempts = attempts.map((att) => {
-      const lastPingTime = att.lastHeartbeat
-        ? new Date(att.lastHeartbeat).getTime()
-        : new Date(att.updatedAt || att.startedAt).getTime();
-      const isOnline = att.status === 'in_progress' && now - lastPingTime < HEARTBEAT_WINDOW_MS;
-
-      const answeredQuestions = (att.answers || []).filter(
-        (a) => a.studentAnswer !== undefined && a.studentAnswer !== null && a.studentAnswer !== ''
-      ).length;
-
-      const totalQuestions = (exam.examSections || []).reduce(
-        (total, s) => total + (s.questions?.length || 0),
-        0
-      );
-
-      return {
-        _id: att._id,
-        studentId: att.student?._id,
-        studentName: att.student?.name || 'Unknown Student',
-        rollNumber: att.student?.studentProfile?.rollNumber || 'N/A',
-        section: att.student?.studentProfile?.section || 'N/A',
-        email: att.student?.email || '',
-        status: att.status,
-        isOnline,
-        startedAt: att.startedAt,
-        deadline: att.deadline,
-        submittedAt: att.submittedAt,
-        tabSwitchesCount: att.tabSwitchesCount || 0,
-        tabSwitchLogs: att.tabSwitchLogs || [],
-        answeredCount: answeredQuestions,
-        totalQuestions,
-        completionPercentage: totalQuestions > 0 ? Math.round((answeredQuestions / totalQuestions) * 100) : 0,
-        score: att.score?.totalScore ?? null,
-        isPassed: att.score?.isPassed ?? null,
-      };
-    });
-
-    const stats = {
-      totalEligible,
-      totalStarted: studentAttempts.length,
-      currentlyOnline: studentAttempts.filter((a) => a.isOnline).length,
-      inProgress: studentAttempts.filter((a) => a.status === 'in_progress').length,
-      submitted: studentAttempts.filter((a) =>
-        ['submitted', 'auto_submitted', 'evaluation_pending', 'evaluated', 'result_published'].includes(a.status)
-      ).length,
-      tabSwitchWarnings: studentAttempts.filter((a) => (a.tabSwitchesCount || 0) > 0).length,
-    };
+    const monitorData = await getLiveExamMonitorData(examId);
 
     res.status(200).json({
       success: true,
-      data: {
-        exam: {
-          _id: exam._id,
-          title: exam.title,
-          examCode: exam.examCode,
-          classGrade: exam.classGrade,
-          sections: exam.sections,
-          subject: exam.subject,
-          status: exam.status,
-          startTime: exam.startTime,
-          endTime: exam.endTime,
-          durationMinutes: exam.durationMinutes,
-          totalMarks: exam.totalMarks,
-          tabSwitchLimit: exam.tabSwitchLimit || 3,
-        },
-        stats,
-        attempts: studentAttempts,
-      },
+      data: monitorData,
     });
   } catch (error) {
     next(error);
