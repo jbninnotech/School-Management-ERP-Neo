@@ -277,12 +277,21 @@ export const previewQuestionsFromFile = async (req, res, next) => {
         if (!questionText) errors.push('Missing question text');
         if (options.length > 0 && options.length < 2) errors.push('MCQs must have at least 2 options');
 
+        const unitName = getVal(['Unit', 'UnitName', 'Chapter']);
+        const topicName = getVal(['Topic', 'TopicName']);
+        const subTopicName = getVal(['Subtopic', 'Sub-topic', 'SubTopic']);
+        const childTopicName = getVal(['ChildTopic', 'Child-topic', 'Child topic']);
+
         return {
           tempId: `tmp_${index + 1}`,
           classGrade: getVal(['Class', 'classGrade']) || classGrade || 'Class 10',
           subject: getVal(['Subject', 'subject']) || subject || 'General',
-          chapter: getVal(['Chapter', 'chapter']) || '',
-          topic: getVal(['Topic', 'topic']) || '',
+          chapter: unitName || '',
+          topic: topicName || '',
+          unitName,
+          topicName,
+          subTopicName,
+          childTopicName,
           questionType: qType,
           difficulty: ['easy', 'medium', 'hard'].includes(difficulty) ? difficulty : 'medium',
           marks,
@@ -328,12 +337,54 @@ export const previewQuestionsFromFile = async (req, res, next) => {
     const validQuestions = parsedQuestions.filter((q) => !q.hasError && q.questionText.trim().length > 0);
     const errorQuestions = parsedQuestions.filter((q) => q.hasError || !q.questionText.trim());
 
+    // Category Path Matching and "Will Create" category summary
+    const Category = (await import('../models/categoryModel.js')).default;
+    const willCreateCategories = [];
+    const willCreateSet = new Set();
+
+    for (const q of validQuestions) {
+      const cls = q.classGrade || classGrade;
+      const sub = q.subject || subject;
+
+      if (q.unitName) {
+        const key = `${sub}|${cls}|unit|${q.unitName.toLowerCase()}`;
+        const existing = await Category.findOne({
+          subject: sub,
+          classGrade: cls,
+          level: 'unit',
+          name: { $regex: `^${q.unitName.trim()}$`, $options: 'i' },
+          isDeleted: false,
+        });
+        if (!existing && !willCreateSet.has(key)) {
+          willCreateSet.add(key);
+          willCreateCategories.push({ level: 'unit', name: q.unitName.trim(), parent: null, path: q.unitName.trim() });
+        }
+      }
+
+      if (q.topicName) {
+        const key = `${sub}|${cls}|topic|${q.topicName.toLowerCase()}`;
+        const existing = await Category.findOne({
+          subject: sub,
+          classGrade: cls,
+          level: 'topic',
+          name: { $regex: `^${q.topicName.trim()}$`, $options: 'i' },
+          isDeleted: false,
+        });
+        if (!existing && !willCreateSet.has(key)) {
+          willCreateSet.add(key);
+          const fullP = q.unitName ? `${q.unitName} > ${q.topicName}` : q.topicName;
+          willCreateCategories.push({ level: 'topic', name: q.topicName.trim(), parent: q.unitName || null, path: fullP });
+        }
+      }
+    }
+
     res.status(200).json({
       success: true,
       fileName: req.file.originalname,
       totalDetected: parsedQuestions.length,
       validCount: validQuestions.length,
       errorCount: errorQuestions.length,
+      willCreateCategories,
       preview: parsedQuestions,
     });
   } catch (error) {

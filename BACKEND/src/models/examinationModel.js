@@ -20,6 +20,10 @@ const examinationSectionSchema = new mongoose.Schema(
         difficulty: { type: String, default: 'medium' },
         chapter: { type: String, default: '' },
         topic: { type: String, default: '' },
+        unitId: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null },
+        topicId: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null },
+        subTopicId: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null },
+        childTopicId: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null },
         marks: { type: Number, required: true, default: 1 },
         negativeMarks: { type: Number, default: 0 },
         instructionText: { type: String, default: '' },
@@ -361,6 +365,16 @@ const examinationSchema = new mongoose.Schema(
     tabSwitchLimit: {
       type: Number,
       default: 3,
+    },
+    // Face proctoring & auto-pause settings
+    facePauseRule: {
+      type: String,
+      enum: ['keep_running', 'freeze_timer'],
+      default: 'keep_running',
+    },
+    maxFacePauseMinutes: {
+      type: Number,
+      default: 5,
     },
 
     // Sections & Questions

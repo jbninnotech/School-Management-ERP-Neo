@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../../components/Sidebar.jsx';
+import TimePicker from '../../components/TimePicker.jsx';
+import { parseTime12h, calcDuration, addMinutes, formatTime12h } from '../../utils/timeUtils.js';
 import API from '../../api/api.js';
 import {
   FileText,
@@ -41,11 +43,13 @@ export default function CreateExamWizard() {
     description: '',
     instructions: '1. All questions are mandatory.\n2. Do not navigate away from the test tab.\n3. Verify your responses before clicking Submit.',
 
-    // Step 2: Schedule
+    // Step 2: Schedule (12-hour format)
     examDate: new Date().toISOString().split('T')[0],
-    startTime: '09:00',
-    endTime: '11:00',
+    startTime: '09:00 AM',
+    endTime: '10:30 AM',
     durationMinutes: 90,
+    facePauseRule: 'keep_running',
+    maxFacePauseMinutes: 5,
     lateStartPolicy: 'allow_with_reduced_time',
     autoSubmitAtDeadline: true,
     resultPublicationMode: 'manual',
@@ -134,10 +138,10 @@ export default function CreateExamWizard() {
         setErrorMsg('Please specify both start time and end time');
         return false;
       }
-      const startDateTime = new Date(`${formData.examDate}T${formData.startTime}:00`);
-      const endDateTime = new Date(`${formData.examDate}T${formData.endTime}:00`);
-      if (endDateTime <= startDateTime) {
-        setErrorMsg('Examination end time must be later than start time');
+      const startDateTime = parseTime12h(formData.startTime, formData.examDate);
+      let endDateTime = parseTime12h(formData.endTime, formData.examDate);
+      if (!startDateTime || !endDateTime) {
+        setErrorMsg('Invalid start or end time format');
         return false;
       }
       if (Number(formData.durationMinutes) <= 0) {
@@ -177,14 +181,21 @@ export default function CreateExamWizard() {
     setErrorMsg('');
 
     try {
-      const startDateTime = new Date(`${formData.examDate}T${formData.startTime}:00`);
-      const endDateTime = new Date(`${formData.examDate}T${formData.endTime}:00`);
+      const startDateTime = parseTime12h(formData.startTime, formData.examDate);
+      let endDateTime = parseTime12h(formData.endTime, formData.examDate);
+      // Midnight crossing adjustment
+      if (endDateTime && startDateTime && endDateTime <= startDateTime) {
+        endDateTime = new Date(endDateTime.getTime() + 24 * 60 * 60 * 1000);
+      }
 
       const payload = {
         ...formData,
         questionPaperId: selectedPaperId || undefined,
         startTime: startDateTime,
         endTime: endDateTime,
+        durationMinutes: Number(formData.durationMinutes),
+        facePauseRule: formData.facePauseRule || 'keep_running',
+        maxFacePauseMinutes: Number(formData.maxFacePauseMinutes) || 5,
         totalMarks: Number(formData.totalMarks),
         passingMarks: Number(formData.passingMarks),
         durationMinutes: Number(formData.durationMinutes),
@@ -557,48 +568,101 @@ export default function CreateExamWizard() {
                   />
                 </div>
 
-                <div className="col-6 col-md-4">
-                  <label className="form-label small fw-semibold text-secondary">Start Time *</label>
-                  <input
-                    type="time"
-                    name="startTime"
-                    className="form-control py-2"
+                <div className="col-12 col-md-4">
+                  <label className="form-label small fw-semibold text-secondary d-block">Start Time (12-hour AM/PM) *</label>
+                  <TimePicker
                     value={formData.startTime}
-                    onChange={handleTextChange}
-                    required
+                    onChange={(newVal) => {
+                      const startD = parseTime12h(newVal, formData.examDate);
+                      let newEnd = formData.endTime;
+                      if (startD && formData.durationMinutes) {
+                        const calculatedEnd = addMinutes(startD, formData.durationMinutes);
+                        newEnd = formatTime12h(calculatedEnd);
+                      }
+                      setFormData((prev) => ({
+                        ...prev,
+                        startTime: newVal,
+                        endTime: newEnd,
+                      }));
+                    }}
                   />
                 </div>
 
-                <div className="col-6 col-md-4">
-                  <label className="form-label small fw-semibold text-secondary">End Time *</label>
-                  <input
-                    type="time"
-                    name="endTime"
-                    className="form-control py-2"
+                <div className="col-12 col-md-4">
+                  <label className="form-label small fw-semibold text-secondary d-block">End Time (12-hour AM/PM) *</label>
+                  <TimePicker
                     value={formData.endTime}
-                    onChange={handleTextChange}
-                    required
+                    onChange={(newVal) => {
+                      const startD = parseTime12h(formData.startTime, formData.examDate);
+                      const endD = parseTime12h(newVal, formData.examDate);
+                      const dur = calcDuration(startD, endD);
+                      setFormData((prev) => ({
+                        ...prev,
+                        endTime: newVal,
+                        durationMinutes: dur > 0 ? dur : prev.durationMinutes,
+                      }));
+                    }}
                   />
                 </div>
 
                 <div className="col-12 col-md-6">
-                  <label className="form-label small fw-semibold text-secondary">Duration (in Minutes) *</label>
+                  <label className="form-label small fw-semibold text-secondary">Duration (Auto-calculated Minutes) *</label>
                   <div className="input-group">
                     <input
                       type="number"
                       name="durationMinutes"
                       className="form-control py-2"
                       min="5"
-                      max="360"
+                      max="720"
                       value={formData.durationMinutes}
-                      onChange={handleTextChange}
+                      onChange={(e) => {
+                        const newDur = Number(e.target.value);
+                        const startD = parseTime12h(formData.startTime, formData.examDate);
+                        let newEnd = formData.endTime;
+                        if (startD && newDur > 0) {
+                          newEnd = formatTime12h(addMinutes(startD, newDur));
+                        }
+                        setFormData((prev) => ({
+                          ...prev,
+                          durationMinutes: newDur,
+                          endTime: newEnd,
+                        }));
+                      }}
                       required
                     />
                     <span className="input-group-text bg-light text-muted">Mins</span>
                   </div>
                   <span className="text-muted" style={{ fontSize: '0.75rem' }}>
-                    Candidate's countdown timer will start upon clicking 'Start Test'.
+                    Auto-calculated from Start & End time or updates End time automatically.
                   </span>
+                </div>
+
+                {/* Face Auto-Pause Proctoring Setting */}
+                <div className="col-12 col-md-6">
+                  <label className="form-label small fw-semibold text-secondary">On Face Pause (Proctoring Timer)</label>
+                  <select
+                    name="facePauseRule"
+                    className="form-select py-2"
+                    value={formData.facePauseRule || 'keep_running'}
+                    onChange={handleTextChange}
+                  >
+                    <option value="keep_running">Keep timer running (Default)</option>
+                    <option value="freeze_timer">Freeze timer (Compensates pause time)</option>
+                  </select>
+                  <div className="d-flex align-items-center gap-2 mt-2">
+                    <span className="text-muted small">Max total face pause limit:</span>
+                    <input
+                      type="number"
+                      name="maxFacePauseMinutes"
+                      className="form-control form-control-sm"
+                      style={{ maxWidth: '80px' }}
+                      min="1"
+                      max="30"
+                      value={formData.maxFacePauseMinutes || 5}
+                      onChange={handleTextChange}
+                    />
+                    <span className="text-muted small">mins before auto-submit</span>
+                  </div>
                 </div>
 
                 <div className="col-12 col-md-6">

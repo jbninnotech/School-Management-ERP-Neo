@@ -330,6 +330,7 @@ export default function LiveExamMonitor() {
                   <th>Admission / Roll</th>
                   <th>Section</th>
                   <th>Status</th>
+                  <th>Face Proctoring</th>
                   <th>Answered</th>
                   <th>Time Left</th>
                   <th>Warnings / Breaches</th>
@@ -377,6 +378,28 @@ export default function LiveExamMonitor() {
                             +{stu.extensionMinutesGranted}m
                           </span>
                         )}
+                      </td>
+                      <td>
+                        {/* Face status badge & pause duration */}
+                        <div className="d-flex flex-column gap-1">
+                          {stu.faceStatus === 'in_frame' && (
+                            <span className="badge bg-success text-white" style={{ maxWidth: '120px' }}>In frame</span>
+                          )}
+                          {stu.faceStatus === 'out_of_frame' && (
+                            <span className="badge bg-danger text-white" style={{ maxWidth: '120px' }}>Out of frame</span>
+                          )}
+                          {stu.faceStatus === 'multiple_faces' && (
+                            <span className="badge bg-danger text-white" style={{ maxWidth: '120px' }}>Multiple faces</span>
+                          )}
+                          {(stu.faceStatus === 'unavailable' || !stu.faceStatus || stu.faceStatus === 'not_started') && (
+                            <span className="badge bg-secondary" style={{ maxWidth: '130px' }}>Check unavailable</span>
+                          )}
+                          {stu.totalFacePausedSeconds > 0 && (
+                            <span className="small text-muted font-monospace" style={{ fontSize: '0.72rem' }}>
+                              Paused: {Math.floor(stu.totalFacePausedSeconds / 60)}m {stu.totalFacePausedSeconds % 60}s
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td>
                         <span className="fw-bold">

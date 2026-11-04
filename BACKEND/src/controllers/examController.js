@@ -1450,6 +1450,30 @@ export const attemptHeartbeat = async (req, res, next) => {
       });
     }
 
+    // Check face pause limit
+    const exam = await Examination.findById(attempt.examination);
+    if (attempt.isFacePaused && attempt.facePausedAt) {
+      const currentPauseSec = Math.round((serverNow.getTime() - new Date(attempt.facePausedAt).getTime()) / 1000);
+      const totalPauseSec = (attempt.totalFacePausedSeconds || 0) + currentPauseSec;
+      const maxAllowedPauseSec = (exam?.maxFacePauseMinutes || 5) * 60;
+
+      if (totalPauseSec > maxAllowedPauseSec) {
+        attempt.status = 'auto_submitted';
+        attempt.submittedAt = serverNow;
+        attempt.submissionType = 'auto_submitted_violation';
+        await attempt.save();
+
+        return res.status(200).json({
+          success: false,
+          isExpired: true,
+          status: 'auto_submitted',
+          submissionType: 'auto_submitted_violation',
+          timeRemainingSeconds: 0,
+          message: 'Face pause duration limit exceeded. Examination auto-submitted.',
+        });
+      }
+    }
+
     if (serverNow > attempt.deadline) {
       attempt.status = 'auto_submitted';
       attempt.submittedAt = serverNow;
@@ -1475,6 +1499,9 @@ export const attemptHeartbeat = async (req, res, next) => {
       serverTime: serverNow,
       timeRemainingSeconds,
       status: attempt.status,
+      isFacePaused: attempt.isFacePaused,
+      faceStatus: attempt.faceStatus || 'in_frame',
+      totalFacePausedSeconds: attempt.totalFacePausedSeconds || 0,
     });
   } catch (error) {
     next(error);
@@ -1544,6 +1571,57 @@ export const logAttemptViolation = async (req, res, next) => {
     const exam = attempt.examination;
     const maxAllowedWarnings = exam?.maxWarnings || 3;
 
+    // Handle Face proctoring violation types and face status
+    const isFaceViolation = ['face_out_of_frame', 'no_face', 'multiple_faces'].includes(type);
+    if (isFaceViolation) {
+      attempt.faceViolationCount = (attempt.faceViolationCount || 0) + 1;
+      attempt.faceStatus =
+        type === 'face_out_of_frame'
+          ? 'out_of_frame'
+          : type === 'multiple_faces'
+          ? 'multiple_faces'
+          : 'out_of_frame';
+
+      // Check server freeze timer policy
+      if (exam?.facePauseRule === 'freeze_timer') {
+        if (!attempt.isFacePaused) {
+          attempt.isFacePaused = true;
+          attempt.facePausedAt = new Date();
+        }
+      }
+    } else if (type === 'face_resumed') {
+      // Face returned inside frame for 2s
+      if (attempt.isFacePaused && attempt.facePausedAt) {
+        const pauseDurationSec = Math.round((Date.now() - new Date(attempt.facePausedAt).getTime()) / 1000);
+        attempt.totalFacePausedSeconds = (attempt.totalFacePausedSeconds || 0) + Math.max(0, pauseDurationSec);
+        // Extend deadline by paused duration if timer was frozen
+        if (exam?.facePauseRule === 'freeze_timer') {
+          attempt.deadline = new Date(new Date(attempt.deadline).getTime() + pauseDurationSec * 1000);
+        }
+      }
+      attempt.isFacePaused = false;
+      attempt.facePausedAt = null;
+      attempt.faceStatus = 'in_frame';
+      await attempt.save();
+
+      const io = req.app.get('io');
+      if (io) {
+        io.to(`exam_${exam._id}`).emit('student_face_resumed', {
+          attemptId: attempt._id,
+          studentId: attempt.student._id,
+          totalFacePausedSeconds: attempt.totalFacePausedSeconds,
+          faceStatus: 'in_frame',
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        isFacePaused: false,
+        totalFacePausedSeconds: attempt.totalFacePausedSeconds,
+        message: 'Face verified in frame. Exam resumed.',
+      });
+    }
+
     attempt.tabSwitchesCount = (attempt.tabSwitchesCount || 0) + 1;
     const currentWarningNumber = attempt.tabSwitchesCount;
 
@@ -1561,7 +1639,15 @@ export const logAttemptViolation = async (req, res, next) => {
     });
 
     let autoSubmitted = false;
-    if (currentWarningNumber >= maxAllowedWarnings) {
+    // Auto-submit if warning threshold exceeded OR face pause limit exceeded
+    const maxPauseSeconds = (exam?.maxFacePauseMinutes || 5) * 60;
+    const isPauseLimitExceeded =
+      attempt.isFacePaused &&
+      (attempt.totalFacePausedSeconds || 0) +
+        Math.round((Date.now() - (attempt.facePausedAt ? new Date(attempt.facePausedAt).getTime() : Date.now())) / 1000) >
+        maxPauseSeconds;
+
+    if (currentWarningNumber >= maxAllowedWarnings || isPauseLimitExceeded) {
       attempt.status = 'auto_submitted';
       attempt.submittedAt = new Date();
       attempt.submissionType = 'auto_submitted_violation';
@@ -1581,6 +1667,8 @@ export const logAttemptViolation = async (req, res, next) => {
         warningNumber: currentWarningNumber,
         maxWarnings: maxAllowedWarnings,
         violationType: type,
+        faceStatus: attempt.faceStatus,
+        totalFacePausedSeconds: attempt.totalFacePausedSeconds,
         autoSubmitted,
         timestamp: new Date(),
       });

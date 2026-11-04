@@ -12,8 +12,10 @@ import {
   AlertTriangle,
   HelpCircle,
   FileCheck2,
-  BookOpen
+  BookOpen,
+  Download
 } from 'lucide-react';
+import { formatDateTime12h } from '../../utils/timeUtils.js';
 
 export default function StudentResultView() {
   const { id } = useParams(); // examId
@@ -98,9 +100,33 @@ export default function StudentResultView() {
               <small className="text-muted">{exam?.title} • {exam?.subject}</small>
             </div>
           </div>
-          <button className="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1" onClick={() => window.print()}>
-            <Printer size={15} /> Print Certificate
-          </button>
+          <div className="d-flex align-items-center gap-2">
+            <button
+              className="btn btn-primary btn-sm d-flex align-items-center gap-1 shadow-sm"
+              onClick={async () => {
+                if (!attempt?._id) return;
+                try {
+                  const res = await API.get(`/exams/attempts/${attempt._id}/mark-sheet/pdf`, {
+                    responseType: 'blob',
+                  });
+                  const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+                  const link = document.createElement('a');
+                  link.href = url;
+                  link.setAttribute('download', `Marksheet_${attempt.student?.name || 'Student'}_${exam?.examCode || 'Exam'}.pdf`);
+                  document.body.appendChild(link);
+                  link.click();
+                  link.remove();
+                } catch (err) {
+                  alert(err.response?.data?.message || 'Failed to download marks sheet PDF');
+                }
+              }}
+            >
+              <Download size={15} /> Download Marks Sheet PDF
+            </button>
+            <button className="btn btn-outline-secondary btn-sm d-flex align-items-center gap-1" onClick={() => window.print()}>
+              <Printer size={15} /> Print Certificate
+            </button>
+          </div>
         </div>
 
         {/* Certificate Score Hero Banner */}
@@ -116,7 +142,7 @@ export default function StudentResultView() {
                 School ID: {attempt?.student?.schoolId} • Roll #{attempt?.student?.studentProfile?.rollNumber || '1001'}
               </div>
               <div className="d-flex gap-3 small">
-                <span>Submitted: {attempt?.submittedAt ? new Date(attempt.submittedAt).toLocaleString() : 'N/A'}</span>
+                <span>Submitted: {attempt?.submittedAt ? formatDateTime12h(attempt.submittedAt) : 'N/A'}</span>
                 <span>•</span>
                 <span>Duration: {exam?.durationMinutes} Mins</span>
               </div>

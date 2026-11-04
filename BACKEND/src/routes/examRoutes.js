@@ -30,6 +30,7 @@ import {
   resumeExam,
   endExam,
 } from '../controllers/examController.js';
+import { downloadExamMarkSheetPdf } from '../controllers/pdfReportController.js';
 import { protect, authorize } from '../middlewares/authMiddleware.js';
 
 const router = Router();
@@ -41,6 +42,7 @@ router.post('/', protect, authorize('superadmin', 'principal', 'admin', 'teacher
 // Specific Attempt Endpoints (Must be registered BEFORE parameterized '/:id' routes)
 router.post('/attempts/:attemptId/heartbeat', protect, attemptHeartbeat);
 router.post('/attempts/:attemptId/violation', protect, logAttemptViolation);
+router.get('/attempts/:attemptId/mark-sheet/pdf', protect, downloadExamMarkSheetPdf);
 router.put('/attempts/:attemptId/answers/:questionId', protect, saveAttemptAnswerDirect);
 router.post('/attempts/:attemptId/submit', protect, submitExamAttempt);
 router.post('/save-answer', protect, authorize('student'), saveStudentAnswer);

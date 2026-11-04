@@ -110,6 +110,33 @@ const examinationAttemptSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    // Reference face verification snapshot taken during setup
+    referenceFaceSnapshotUrl: {
+      type: String,
+      default: '',
+    },
+    // Face tracking & server pause accounting
+    faceStatus: {
+      type: String,
+      enum: ['in_frame', 'out_of_frame', 'multiple_faces', 'unavailable', 'not_started'],
+      default: 'not_started',
+    },
+    isFacePaused: {
+      type: Boolean,
+      default: false,
+    },
+    facePausedAt: {
+      type: Date,
+      default: null,
+    },
+    totalFacePausedSeconds: {
+      type: Number,
+      default: 0,
+    },
+    faceViolationCount: {
+      type: Number,
+      default: 0,
+    },
     answers: [studentAnswerSchema],
     tabSwitchesCount: {
       type: Number,

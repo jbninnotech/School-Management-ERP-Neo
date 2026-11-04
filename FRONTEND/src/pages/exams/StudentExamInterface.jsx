@@ -51,6 +51,11 @@ export default function StudentExamInterface() {
   const [calcResult, setCalcResult] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // Face auto-pause state
+  const [isFacePaused, setIsFacePaused] = useState(false);
+  const [facePauseDurationSec, setFacePauseDurationSec] = useState(0);
+  const facePauseIntervalRef = useRef(null);
+
   // References
   const timerRef = useRef(null); // <-- FIXED: Added missing timerRef
   const heartbeatIntervalRef = useRef(null);
@@ -151,11 +156,16 @@ export default function StudentExamInterface() {
     initExam();
   }, [id]);
 
-  // 2. Authoritative Timer Loop
+  // Authoritative Timer Loop (respects face pause if timer is frozen)
   useEffect(() => {
     if (loading || !attempt) return;
 
     timerRef.current = setInterval(() => {
+      // If exam has freeze_timer rule and face is currently paused, pause client timer display
+      if (exam?.facePauseRule === 'freeze_timer' && isFacePaused) {
+        return;
+      }
+
       setSecondsRemaining((prev) => {
         if (prev <= 1) {
           clearInterval(timerRef.current);
@@ -169,7 +179,7 @@ export default function StudentExamInterface() {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [loading, attempt]);
+  }, [loading, attempt, exam?.facePauseRule, isFacePaused]);
 
   // Request Mandatory Camera and Geolocation Access (Phase 6)
   const requestMediaAndLocationPermissions = async () => {
@@ -253,7 +263,39 @@ export default function StudentExamInterface() {
     }
   };
 
-  // 3. Tab Visibility, Window Blur, Fullscreen & Shortcut Anti-Cheat Listeners
+  // Handle Face Proctoring State Changes during exam
+  const handleFaceProctorState = async (status, details) => {
+    if (!attempt || attempt.status !== 'in_progress') return;
+
+    if (['face_out_of_frame', 'no_face', 'multiple_faces'].includes(status)) {
+      if (!isFacePaused) {
+        setIsFacePaused(true);
+        // Start duration counter for paused overlay
+        if (!facePauseIntervalRef.current) {
+          facePauseIntervalRef.current = setInterval(() => {
+            setFacePauseDurationSec((prev) => prev + 1);
+          }, 1000);
+        }
+
+        reportViolation(status, details?.message || 'Face is out of guide frame.');
+      }
+    } else if (status === 'in_frame') {
+      if (isFacePaused) {
+        setIsFacePaused(false);
+        if (facePauseIntervalRef.current) {
+          clearInterval(facePauseIntervalRef.current);
+          facePauseIntervalRef.current = null;
+        }
+
+        try {
+          await API.post(`/exams/attempts/${attempt._id}/violation`, {
+            type: 'face_resumed',
+            reason: 'Face returned to center frame',
+          });
+        } catch (_) {}
+      }
+    }
+  };
   useEffect(() => {
     if (!attempt || attempt.status !== 'in_progress') return;
 
@@ -716,7 +758,38 @@ export default function StudentExamInterface() {
       </header>
 
       {/* 2. MAIN TEST CONTENT & PALETTE SPLIT LAYOUT */}
-      <div className="d-flex flex-grow-1 overflow-hidden" style={{ height: 'calc(100vh - 65px)' }}>
+      <div className="d-flex flex-grow-1 overflow-hidden position-relative" style={{ height: 'calc(100vh - 65px)' }}>
+
+        {/* FACE OUT OF FRAME PAUSE OVERLAY */}
+        {isFacePaused && (
+          <div
+            className="position-absolute top-0 start-0 w-100 h-100 d-flex flex-column align-items-center justify-content-center text-center p-4 z-3"
+            style={{
+              backgroundColor: 'rgba(15, 23, 42, 0.85)',
+              backdropFilter: 'blur(8px)',
+            }}
+            data-testid="face-pause-overlay"
+          >
+            <div className="card border-0 shadow-lg p-4 rounded-4" style={{ maxWidth: '480px' }}>
+              <div className="text-warning mb-3">
+                <AlertTriangle size={48} className="mx-auto" />
+              </div>
+              <h4 className="fw-bold text-dark mb-2">Exam Paused</h4>
+              <p className="text-muted small mb-3">
+                Please keep your face centered inside the guide box. The examination answers are temporarily blurred and disabled for integrity.
+              </p>
+              <div className="p-3 bg-light rounded-3 mb-3 border">
+                <div className="text-secondary small">Pause Duration:</div>
+                <div className="fs-4 fw-bold text-primary font-monospace">
+                  {Math.floor(facePauseDurationSec / 60)}m {facePauseDurationSec % 60}s
+                </div>
+              </div>
+              <div className="text-muted small">
+                The exam will automatically resume once your face is aligned inside the green border box for 2 seconds.
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* LEFT / CENTER: QUESTION WORKSPACE */}
         <div className="flex-grow-1 d-flex flex-column bg-white p-4 overflow-y-auto" style={{ borderRight: '1px solid #e2e8f0' }}>
@@ -1035,7 +1108,12 @@ export default function StudentExamInterface() {
                 <Camera size={14} className="text-primary" /> Live Proctoring
               </span>
             </div>
-            <CameraProctor mode="during_exam" required={false} showPreview={true} />
+            <CameraProctor
+              mode="during_exam"
+              required={false}
+              showPreview={true}
+              onFaceStateChange={handleFaceProctorState}
+            />
           </div>
 
           <hr className="my-2 opacity-25" />

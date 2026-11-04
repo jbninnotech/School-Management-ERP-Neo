@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import Sidebar from '../../components/Sidebar.jsx';
 import reportService from '../../services/reportService.js';
+import categoryService from '../../services/categoryService.js';
+import { formatDateTime12h } from '../../utils/timeUtils.js';
 import {
   Award,
   TrendingUp,
@@ -29,14 +31,21 @@ import autoTable from 'jspdf-autotable';
 export default function StudentReport() {
   const user = JSON.parse(sessionStorage.getItem('user') || '{}');
   const [report, setReport] = useState(null);
+  const [topicAnalysis, setTopicAnalysis] = useState(null);
+  const [drillLevel, setDrillLevel] = useState('unit'); // 'unit' | 'topic' | 'subtopic' | 'child'
+  const [topicSearch, setTopicSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   const fetchReport = async () => {
     setLoading(true);
     try {
-      const res = await reportService.getStudentReport('me');
-      setReport(res.data);
+      const [resReport, resAnalysis] = await Promise.all([
+        reportService.getStudentReport('me'),
+        categoryService.getTopicAnalysis({ search: topicSearch }),
+      ]);
+      setReport(resReport.data);
+      setTopicAnalysis(resAnalysis.data);
       setError('');
     } catch (err) {
       setError(err.message || 'Failed to retrieve performance report');
@@ -47,58 +56,37 @@ export default function StudentReport() {
 
   useEffect(() => {
     fetchReport();
-  }, []);
+  }, [topicSearch]);
 
-  const handleDownloadPDF = () => {
-    if (!report) return;
+  const handleDownloadPDF = async () => {
     try {
-      const doc = new jsPDF();
-      doc.setFontSize(18);
-      doc.text('Student Academic Performance Report', 14, 20);
-      doc.setFontSize(11);
-      doc.setTextColor(100);
-      doc.text(
-        `Candidate: ${report.student?.name} | Roll #${report.student?.rollNumber || '-'} | Class: ${report.student?.classGrade || '-'}`,
-        14,
-        28
-      );
-      doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 35);
-      doc.setTextColor(0);
-
-      // Summary Table
-      autoTable(doc, {
-        startY: 42,
-        head: [['Metric', 'Performance Result']],
-        body: [
-          ['Exams Attempted & Published', report.summary?.totalExamsAttempted || 0],
-          ['Cumulative Average Percentage', `${report.summary?.overallAveragePercentage || 0}%`],
-          ['Passed Examinations', report.summary?.passedExamsCount || 0],
-        ],
-        theme: 'striped',
-        headStyles: { fillColor: [37, 99, 235] },
-      });
-
-      // Exam History Table
-      if (report.examHistory?.length > 0) {
-        autoTable(doc, {
-          startY: doc.lastAutoTable.finalY + 10,
-          head: [['Exam Code', 'Exam Title', 'Subject', 'Score', 'Percentage', 'Status']],
-          body: report.examHistory.map((e) => [
-            e.examCode || 'EXM',
-            e.examTitle || 'Exam',
-            e.subject || '',
-            `${e.score} / ${e.maxMarks}`,
-            `${e.percentage}%`,
-            e.isPassed ? 'PASS' : 'NEEDS IMP',
-          ]),
-          theme: 'striped',
-          headStyles: { fillColor: [16, 185, 129] },
-        });
-      }
-
-      doc.save(`Student_Report_${report.student?.name?.replace(/\s+/g, '_') || 'Academic'}.pdf`);
+      const blob = await reportService.downloadReportPdf('me');
+      const url = window.URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `Student_Report_${report?.student?.name || 'Academic'}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
     } catch (err) {
-      alert('Failed to generate PDF: ' + err.message);
+      // Fallback to client-side jsPDF if server streaming blocked
+      if (!report) return;
+      try {
+        const doc = new jsPDF();
+        doc.setFontSize(18);
+        doc.text('Student Academic Performance Report', 14, 20);
+        doc.setFontSize(11);
+        doc.setTextColor(100);
+        doc.text(
+          `Candidate: ${report.student?.name} | Roll #${report.student?.rollNumber || '-'} | Class: ${report.student?.classGrade || '-'}`,
+          14,
+          28
+        );
+        doc.text(`Generated: ${formatDateTime12h(new Date())}`, 14, 35);
+        doc.save(`Student_Report_${report.student?.name?.replace(/\s+/g, '_') || 'Academic'}.pdf`);
+      } catch (e) {
+        alert('Failed to generate PDF: ' + e.message);
+      }
     }
   };
 
@@ -218,6 +206,125 @@ export default function StudentReport() {
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
+              </div>
+            </div>
+
+            {/* 4-LEVEL CHAPTER AND TOPIC ANALYSIS DRILL-DOWN */}
+            <div className="card border-0 shadow-sm rounded-4 bg-white p-4 mb-4">
+              <div className="d-flex flex-wrap justify-content-between align-items-center mb-3">
+                <div>
+                  <h5 className="fw-bold text-dark mb-1 d-flex align-items-center gap-2">
+                    <Layers size={20} className="text-primary" /> Chapter & Topic Drill-Down Analysis
+                  </h5>
+                  <p className="text-muted small mb-0">
+                    Drill down across Unit, Topic, Sub-topic, and Child topic levels with scored marks vs total marks.
+                  </p>
+                </div>
+
+                <div className="d-flex align-items-center gap-2 mt-2 mt-md-0">
+                  <input
+                    type="text"
+                    className="form-control form-control-sm"
+                    style={{ width: '200px' }}
+                    placeholder="Search topic / path..."
+                    value={topicSearch}
+                    onChange={(e) => setTopicSearch(e.target.value)}
+                  />
+
+                  <div className="btn-group btn-group-sm">
+                    {['unit', 'topic', 'subtopic', 'child'].map((lvl) => (
+                      <button
+                        key={lvl}
+                        className={`btn ${drillLevel === lvl ? 'btn-primary' : 'btn-outline-secondary'}`}
+                        onClick={() => setDrillLevel(lvl)}
+                      >
+                        {lvl.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {topicAnalysis?.levelBreakdown?.[drillLevel]?.length > 0 ? (
+                <div className="mb-4">
+                  <div style={{ width: '100%', height: 260 }}>
+                    <ResponsiveContainer>
+                      <BarChart data={topicAnalysis.levelBreakdown[drillLevel]}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                        <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                        <YAxis domain={[0, 100]} unit="%" />
+                        <Tooltip formatter={(value) => [`${value}%`, 'Score Percentage']} />
+                        <Bar dataKey="percentage" fill="#2563eb" radius={[6, 6, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  <div className="table-responsive mt-3">
+                    <table className="table table-sm table-bordered align-middle mb-0">
+                      <thead className="table-light small">
+                        <tr>
+                          <th>Path / Name</th>
+                          <th>Level</th>
+                          <th>Subject</th>
+                          <th>Scored / Total</th>
+                          <th>Percentage</th>
+                          <th>Performance Rating</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {topicAnalysis.levelBreakdown[drillLevel].map((item) => (
+                          <tr key={item.categoryId}>
+                            <td>
+                              <div className="fw-semibold small">{item.name}</div>
+                              <div className="text-muted" style={{ fontSize: '0.72rem' }}>
+                                {item.fullPath}
+                              </div>
+                            </td>
+                            <td><span className="badge bg-light text-dark border text-uppercase">{item.level}</span></td>
+                            <td>{item.subject}</td>
+                            <td className="font-monospace small">{item.scoredMarks} / {item.totalMarks}</td>
+                            <td className="fw-bold">{item.percentage}%</td>
+                            <td>
+                              <span className={`badge bg-${item.colorClass}`}>
+                                {item.performanceLabel}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-4 text-muted small">
+                  No data points recorded for level '{drillLevel.toUpperCase()}'.
+                </div>
+              )}
+
+              <div className="mt-4 pt-3 border-top">
+                <h6 className="fw-bold text-danger mb-2 d-flex align-items-center gap-1">
+                  <AlertTriangle size={16} /> Weak Areas Diagnosis (Lowest Scoring First)
+                </h6>
+                {topicAnalysis?.weakAreas?.length > 0 ? (
+                  <div className="d-flex flex-column gap-2">
+                    {topicAnalysis.weakAreas.map((w) => (
+                      <div
+                        key={w.categoryId}
+                        className="p-2 rounded bg-danger-subtle border border-danger-subtle d-flex justify-content-between align-items-center small"
+                      >
+                        <div>
+                          <div className="fw-semibold text-danger">{w.name} ({w.percentage}%)</div>
+                          <div className="text-muted" style={{ fontSize: '0.72rem' }}>Path: {w.fullPath}</div>
+                        </div>
+                        <div className="text-end">
+                          <span className="badge bg-danger text-white">Questions Attempted: {w.attemptsCount}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-muted small">No weak areas identified below 40% score. Great job!</div>
+                )}
               </div>
             </div>
 

@@ -168,6 +168,10 @@ export const getLiveExamMonitorData = async (examId) => {
       lastHeartbeatAt,
       lastSavedAt,
       timeRemainingSec,
+      faceStatus: att?.faceStatus || 'not_started',
+      isFacePaused: att?.isFacePaused || false,
+      totalFacePausedSeconds: att?.totalFacePausedSeconds || 0,
+      faceViolationCount: att?.faceViolationCount || 0,
     });
   }
 
