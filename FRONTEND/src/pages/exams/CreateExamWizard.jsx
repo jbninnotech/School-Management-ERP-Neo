@@ -228,7 +228,7 @@ export default function CreateExamWizard() {
         @media (max-width: 991.98px) {
           .wizard-container {
             margin-left: 0 !important;
-            padding: 16px 14px 80px 14px !important;
+            padding: 74px 14px 80px 14px !important;
           }
         }
         .form-check-card {

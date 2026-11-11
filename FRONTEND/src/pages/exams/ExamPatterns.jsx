@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
-import Sidebar from '../../components/Sidebar.jsx';
-import examPatternService from '../../services/examPatternService.js';
-import teacherService from '../../services/teacherService.js';
+import React, { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
+import Sidebar from "../../components/Sidebar.jsx";
+import examPatternService from "../../services/examPatternService.js";
+import teacherService from "../../services/teacherService.js";
 import {
   Layers,
   PlusCircle,
@@ -15,50 +15,50 @@ import {
   AlertTriangle,
   Search,
   Filter,
-} from 'lucide-react';
+} from "lucide-react";
 
 export default function ExamPatterns() {
-  const user = JSON.parse(sessionStorage.getItem('user') || '{}');
-  const isAdmin = ['superadmin', 'principal', 'admin'].includes(user.role);
+  const user = JSON.parse(sessionStorage.getItem("user") || "{}");
+  const isAdmin = ["superadmin", "principal", "admin"].includes(user.role);
 
   const [patterns, setPatterns] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [classFilter, setClassFilter] = useState('');
+  const [error, setError] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [classFilter, setClassFilter] = useState("");
 
   // Modal State
   const [showModal, setShowModal] = useState(false);
   const [editingPattern, setEditingPattern] = useState(null);
   const [formData, setFormData] = useState({
-    name: '',
-    classGrade: 'Class 10',
-    subject: 'Mathematics',
+    name: "",
+    classGrade: "Class 10",
+    subject: "Mathematics",
     durationMinutes: 60,
     totalMarks: 50,
     passingMarks: 20,
     negativeMarking: false,
     maxWarnings: 3,
-    instructions: 'Follow standard examination regulations.',
+    instructions: "Follow standard examination regulations.",
     sections: [
       {
-        name: 'Section A - Objective MCQ',
-        questionType: 'single_mcq',
+        name: "Section A - Objective MCQ",
+        questionType: "single_mcq",
         numberOfQuestions: 10,
         marksPerQuestion: 1,
         negativeMarksPerQuestion: 0,
       },
       {
-        name: 'Section B - Short Answer',
-        questionType: 'short_answer',
+        name: "Section B - Short Answer",
+        questionType: "short_answer",
         numberOfQuestions: 10,
         marksPerQuestion: 2,
         negativeMarksPerQuestion: 0,
       },
       {
-        name: 'Section C - Long Answer',
-        questionType: 'long_answer',
+        name: "Section C - Long Answer",
+        questionType: "long_answer",
         numberOfQuestions: 4,
         marksPerQuestion: 5,
         negativeMarksPerQuestion: 0,
@@ -75,9 +75,9 @@ export default function ExamPatterns() {
     try {
       const res = await examPatternService.getPatterns();
       setPatterns(res.data || []);
-      setError('');
+      setError("");
     } catch (err) {
-      setError(err.message || 'Failed to load exam patterns');
+      setError(err.message || "Failed to load exam patterns");
     } finally {
       setLoading(false);
     }
@@ -98,19 +98,19 @@ export default function ExamPatterns() {
   const handleOpenCreate = () => {
     setEditingPattern(null);
     setFormData({
-      name: '',
-      classGrade: 'Class 10',
-      subject: 'Mathematics',
+      name: "",
+      classGrade: "Class 10",
+      subject: "Mathematics",
       durationMinutes: 60,
       totalMarks: 50,
       passingMarks: 20,
       negativeMarking: false,
       maxWarnings: 3,
-      instructions: 'Follow standard examination regulations.',
+      instructions: "Follow standard examination regulations.",
       sections: [
         {
-          name: 'Section A - Objective MCQ',
-          questionType: 'single_mcq',
+          name: "Section A - Objective MCQ",
+          questionType: "single_mcq",
           numberOfQuestions: 10,
           marksPerQuestion: 1,
           negativeMarksPerQuestion: 0,
@@ -132,7 +132,7 @@ export default function ExamPatterns() {
       passingMarks: pattern.passingMarks,
       negativeMarking: Boolean(pattern.negativeMarking),
       maxWarnings: pattern.maxWarnings || 3,
-      instructions: pattern.instructions || '',
+      instructions: pattern.instructions || "",
       sections: pattern.sections || [],
       assignedTeachers: (pattern.assignedTeachers || []).map((t) => t._id || t),
     });
@@ -146,7 +146,7 @@ export default function ExamPatterns() {
         ...formData.sections,
         {
           name: `Section ${String.fromCharCode(65 + formData.sections.length)}`,
-          questionType: 'single_mcq',
+          questionType: "single_mcq",
           numberOfQuestions: 5,
           marksPerQuestion: 1,
           negativeMarksPerQuestion: 0,
@@ -165,7 +165,10 @@ export default function ExamPatterns() {
     updated[index][field] = value;
     // Auto-calculate total marks
     const computedTotal = updated.reduce(
-      (sum, sec) => sum + (Number(sec.numberOfQuestions) || 0) * (Number(sec.marksPerQuestion) || 0),
+      (sum, sec) =>
+        sum +
+        (Number(sec.numberOfQuestions) || 0) *
+          (Number(sec.marksPerQuestion) || 0),
       0
     );
     setFormData({
@@ -186,34 +189,41 @@ export default function ExamPatterns() {
       setShowModal(false);
       fetchPatterns();
     } catch (err) {
-      alert(err.message || 'Error saving pattern');
+      alert(err.message || "Error saving pattern");
     }
   };
 
   const handleDeletePattern = async (id) => {
-    if (window.confirm('Are you sure you want to soft-delete this exam pattern?')) {
+    if (
+      window.confirm("Are you sure you want to soft-delete this exam pattern?")
+    ) {
       try {
         await examPatternService.deletePattern(id);
         fetchPatterns();
       } catch (err) {
-        alert(err.message || 'Error deleting pattern');
+        alert(err.message || "Error deleting pattern");
       }
     }
   };
 
   const handleOpenAssign = (pattern) => {
     setAssignModalPattern(pattern);
-    setSelectedTeacherIds((pattern.assignedTeachers || []).map((t) => t._id || t));
+    setSelectedTeacherIds(
+      (pattern.assignedTeachers || []).map((t) => t._id || t)
+    );
   };
 
   const handleSaveAssignment = async () => {
     if (!assignModalPattern) return;
     try {
-      await examPatternService.assignTeachers(assignModalPattern._id, selectedTeacherIds);
+      await examPatternService.assignTeachers(
+        assignModalPattern._id,
+        selectedTeacherIds
+      );
       setAssignModalPattern(null);
       fetchPatterns();
     } catch (err) {
-      alert(err.message || 'Failed to assign teachers');
+      alert(err.message || "Failed to assign teachers");
     }
   };
 
@@ -226,23 +236,46 @@ export default function ExamPatterns() {
   });
 
   return (
-    <div style={{ backgroundColor: '#f8fafc', minHeight: '100vh' }}>
+    <div
+      style={{
+        backgroundColor: "#f8fafc",
+        minHeight: "100vh",
+        width: "100%",
+        overflowX: "hidden",
+      }}
+    >
+      <style>{`
+    .pattern-container {
+      margin-left: 260px;
+      padding: 28px 36px;
+      transition: margin 0.25s ease-in-out;
+    }
+    @media (max-width: 991.98px) {
+      .pattern-container {
+        margin-left: 0 !important;
+        padding: 74px 14px 80px 14px !important;
+      }
+    }
+  `}</style>
+
       <Sidebar user={user} />
-      <main style={{ marginLeft: '260px', padding: '28px 36px' }}>
+      <main className="pattern-container">
         {/* Header */}
         <div className="d-flex flex-wrap justify-content-between align-items-center mb-4 pb-3 border-bottom">
           <div>
             <h3 className="fw-bold mb-1 text-dark d-flex align-items-center gap-2">
-              <Layers size={24} className="text-primary" /> Examination Patterns & Blueprints
+              <Layers size={24} className="text-primary" /> Examination Patterns
+              & Blueprints
             </h3>
             <p className="text-muted small mb-0">
-              Standardize exam sections, question quotas, timing, and assign strict templates to teachers
+              Standardize exam sections, question quotas, timing, and assign
+              strict templates to teachers
             </p>
           </div>
           {isAdmin && (
             <button
               className="btn btn-primary px-3 py-2 fw-semibold d-flex align-items-center gap-2 rounded-3 shadow-sm"
-              style={{ backgroundColor: '#2563eb' }}
+              style={{ backgroundColor: "#2563eb" }}
               onClick={handleOpenCreate}
             >
               <PlusCircle size={16} /> Create Exam Pattern
@@ -273,9 +306,13 @@ export default function ExamPatterns() {
               onChange={(e) => setClassFilter(e.target.value)}
             >
               <option value="">All Classes</option>
-              {Array.from({ length: 12 }, (_, i) => `Class ${i + 1}`).map((cls) => (
-                <option key={cls} value={cls}>{cls}</option>
-              ))}
+              {Array.from({ length: 12 }, (_, i) => `Class ${i + 1}`).map(
+                (cls) => (
+                  <option key={cls} value={cls}>
+                    {cls}
+                  </option>
+                )
+              )}
             </select>
           </div>
         </div>
@@ -284,18 +321,23 @@ export default function ExamPatterns() {
         {loading ? (
           <div className="text-center py-5">
             <div className="spinner-border text-primary" role="status" />
-            <p className="text-muted small mt-2">Loading official patterns...</p>
+            <p className="text-muted small mt-2">
+              Loading official patterns...
+            </p>
           </div>
         ) : error ? (
           <div className="alert alert-danger">{error}</div>
         ) : filteredPatterns.length === 0 ? (
           <div className="card border-0 shadow-sm rounded-4 p-5 text-center text-muted bg-white">
-            <Layers size={48} className="mx-auto mb-2 text-secondary opacity-50" />
+            <Layers
+              size={48}
+              className="mx-auto mb-2 text-secondary opacity-50"
+            />
             <h5>No Exam Patterns Available</h5>
             <p className="small">
               {isAdmin
-                ? 'Create standard templates to enforce section quotas and time limits for teachers.'
-                : 'No exam patterns currently assigned to your account.'}
+                ? "Create standard templates to enforce section quotas and time limits for teachers."
+                : "No exam patterns currently assigned to your account."}
             </p>
           </div>
         ) : (
@@ -308,7 +350,9 @@ export default function ExamPatterns() {
                       <span className="badge bg-primary-subtle text-primary border border-primary-subtle me-2">
                         {pat.classGrade}
                       </span>
-                      <span className="badge bg-light text-dark border">{pat.subject}</span>
+                      <span className="badge bg-light text-dark border">
+                        {pat.subject}
+                      </span>
                     </div>
                     {isAdmin && (
                       <div className="d-flex gap-1">
@@ -339,19 +383,37 @@ export default function ExamPatterns() {
 
                   <h5 className="fw-bold text-dark mb-1">{pat.name}</h5>
                   <div className="d-flex gap-3 small text-muted mb-3">
-                    <span><Clock size={14} className="me-1 inline" /> {pat.durationMinutes} mins</span>
-                    <span><Award size={14} className="me-1 inline" /> {pat.totalMarks} Marks (Pass: {pat.passingMarks})</span>
-                    {pat.negativeMarking && <span className="text-danger">Negative Marking Enabled</span>}
+                    <span>
+                      <Clock size={14} className="me-1 inline" />{" "}
+                      {pat.durationMinutes} mins
+                    </span>
+                    <span>
+                      <Award size={14} className="me-1 inline" />{" "}
+                      {pat.totalMarks} Marks (Pass: {pat.passingMarks})
+                    </span>
+                    {pat.negativeMarking && (
+                      <span className="text-danger">
+                        Negative Marking Enabled
+                      </span>
+                    )}
                   </div>
 
                   {/* Sections list */}
                   <div className="bg-light p-3 rounded-3 mb-3 small">
-                    <strong className="d-block mb-1 text-dark">Section Blueprint:</strong>
+                    <strong className="d-block mb-1 text-dark">
+                      Section Blueprint:
+                    </strong>
                     {pat.sections?.map((sec, sIdx) => (
-                      <div key={sIdx} className="d-flex justify-content-between text-secondary py-1 border-bottom">
-                        <span>{sec.name} ({sec.questionType?.replace('_', ' ')})</span>
+                      <div
+                        key={sIdx}
+                        className="d-flex justify-content-between text-secondary py-1 border-bottom"
+                      >
+                        <span>
+                          {sec.name} ({sec.questionType?.replace("_", " ")})
+                        </span>
                         <span className="font-monospace fw-semibold">
-                          {sec.numberOfQuestions} Qs × {sec.marksPerQuestion}M = {sec.numberOfQuestions * sec.marksPerQuestion}M
+                          {sec.numberOfQuestions} Qs × {sec.marksPerQuestion}M ={" "}
+                          {sec.numberOfQuestions * sec.marksPerQuestion}M
                         </span>
                       </div>
                     ))}
@@ -364,7 +426,8 @@ export default function ExamPatterns() {
                       Assigned: {pat.assignedTeachers?.length || 0} Faculty
                     </span>
                     <span className="badge bg-success-subtle text-success">
-                      <CheckCircle2 size={12} className="inline me-1" /> Active Template
+                      <CheckCircle2 size={12} className="inline me-1" /> Active
+                      Template
                     </span>
                   </div>
                 </div>
@@ -375,111 +438,182 @@ export default function ExamPatterns() {
 
         {/* Create / Edit Modal */}
         {showModal && (
-          <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1060 }}>
+          <div
+            className="modal show d-block"
+            style={{ backgroundColor: "rgba(0,0,0,0.5)", zIndex: 1060 }}
+          >
             <div className="modal-dialog modal-dialog-centered modal-lg">
               <div className="modal-content border-0 rounded-4 shadow">
                 <div className="modal-header">
                   <h5 className="modal-title fw-bold">
-                    {editingPattern ? 'Edit Exam Pattern' : 'Create Standard Exam Pattern'}
+                    {editingPattern
+                      ? "Edit Exam Pattern"
+                      : "Create Standard Exam Pattern"}
                   </h5>
-                  <button className="btn-close" onClick={() => setShowModal(false)} />
+                  <button
+                    className="btn-close"
+                    onClick={() => setShowModal(false)}
+                  />
                 </div>
                 <form onSubmit={handleSavePattern}>
-                  <div className="modal-body p-4" style={{ maxHeight: '75vh', overflowY: 'auto' }}>
+                  <div
+                    className="modal-body p-4"
+                    style={{ maxHeight: "75vh", overflowY: "auto" }}
+                  >
                     <div className="row g-3 mb-3">
                       <div className="col-md-6">
-                        <label className="form-label small fw-bold">Pattern Name *</label>
+                        <label className="form-label small fw-bold">
+                          Pattern Name *
+                        </label>
                         <input
                           type="text"
                           required
                           className="form-control"
                           placeholder="e.g., CBSE Class 10 Mid-Term Standard"
                           value={formData.name}
-                          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                          onChange={(e) =>
+                            setFormData({ ...formData, name: e.target.value })
+                          }
                         />
                       </div>
                       <div className="col-md-3">
-                        <label className="form-label small fw-bold">Class / Grade *</label>
+                        <label className="form-label small fw-bold">
+                          Class / Grade *
+                        </label>
                         <select
                           className="form-select"
                           value={formData.classGrade}
-                          onChange={(e) => setFormData({ ...formData, classGrade: e.target.value })}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              classGrade: e.target.value,
+                            })
+                          }
                         >
-                          {Array.from({ length: 12 }, (_, i) => `Class ${i + 1}`).map((cls) => (
-                            <option key={cls} value={cls}>{cls}</option>
+                          {Array.from(
+                            { length: 12 },
+                            (_, i) => `Class ${i + 1}`
+                          ).map((cls) => (
+                            <option key={cls} value={cls}>
+                              {cls}
+                            </option>
                           ))}
                         </select>
                       </div>
                       <div className="col-md-3">
-                        <label className="form-label small fw-bold">Subject *</label>
+                        <label className="form-label small fw-bold">
+                          Subject *
+                        </label>
                         <input
                           type="text"
                           required
                           className="form-control"
                           value={formData.subject}
-                          onChange={(e) => setFormData({ ...formData, subject: e.target.value })}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              subject: e.target.value,
+                            })
+                          }
                         />
                       </div>
                     </div>
 
                     <div className="row g-3 mb-4">
                       <div className="col-md-3">
-                        <label className="form-label small fw-bold">Duration (Minutes) *</label>
+                        <label className="form-label small fw-bold">
+                          Duration (Minutes) *
+                        </label>
                         <input
                           type="number"
                           required
                           min="10"
                           className="form-control"
                           value={formData.durationMinutes}
-                          onChange={(e) => setFormData({ ...formData, durationMinutes: Number(e.target.value) })}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              durationMinutes: Number(e.target.value),
+                            })
+                          }
                         />
                       </div>
                       <div className="col-md-3">
-                        <label className="form-label small fw-bold">Total Marks *</label>
+                        <label className="form-label small fw-bold">
+                          Total Marks *
+                        </label>
                         <input
                           type="number"
                           required
                           min="1"
                           className="form-control"
                           value={formData.totalMarks}
-                          onChange={(e) => setFormData({ ...formData, totalMarks: Number(e.target.value) })}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              totalMarks: Number(e.target.value),
+                            })
+                          }
                         />
                       </div>
                       <div className="col-md-3">
-                        <label className="form-label small fw-bold">Passing Marks *</label>
+                        <label className="form-label small fw-bold">
+                          Passing Marks *
+                        </label>
                         <input
                           type="number"
                           required
                           min="1"
                           className="form-control"
                           value={formData.passingMarks}
-                          onChange={(e) => setFormData({ ...formData, passingMarks: Number(e.target.value) })}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              passingMarks: Number(e.target.value),
+                            })
+                          }
                         />
                       </div>
                       <div className="col-md-3">
-                        <label className="form-label small fw-bold">Max Warnings</label>
+                        <label className="form-label small fw-bold">
+                          Max Warnings
+                        </label>
                         <input
                           type="number"
                           min="1"
                           max="10"
                           className="form-control"
                           value={formData.maxWarnings}
-                          onChange={(e) => setFormData({ ...formData, maxWarnings: Number(e.target.value) })}
+                          onChange={(e) =>
+                            setFormData({
+                              ...formData,
+                              maxWarnings: Number(e.target.value),
+                            })
+                          }
                         />
                       </div>
                     </div>
 
                     {/* Section Blueprint Quotas */}
                     <div className="d-flex justify-content-between align-items-center mb-2">
-                      <h6 className="fw-bold text-dark mb-0">Sections & Question Quotas</h6>
-                      <button type="button" className="btn btn-sm btn-outline-primary" onClick={handleAddSection}>
+                      <h6 className="fw-bold text-dark mb-0">
+                        Sections & Question Quotas
+                      </h6>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-outline-primary"
+                        onClick={handleAddSection}
+                      >
                         + Add Section
                       </button>
                     </div>
 
                     <div className="d-flex flex-column gap-2 mb-3">
                       {formData.sections.map((sec, idx) => (
-                        <div key={idx} className="p-3 bg-light rounded-3 border">
+                        <div
+                          key={idx}
+                          className="p-3 bg-light rounded-3 border"
+                        >
                           <div className="row g-2 align-items-center">
                             <div className="col-md-4">
                               <input
@@ -487,20 +621,38 @@ export default function ExamPatterns() {
                                 className="form-control form-control-sm"
                                 placeholder="Section Name"
                                 value={sec.name}
-                                onChange={(e) => handleSectionChange(idx, 'name', e.target.value)}
+                                onChange={(e) =>
+                                  handleSectionChange(
+                                    idx,
+                                    "name",
+                                    e.target.value
+                                  )
+                                }
                               />
                             </div>
                             <div className="col-md-3">
                               <select
                                 className="form-select form-select-sm"
                                 value={sec.questionType}
-                                onChange={(e) => handleSectionChange(idx, 'questionType', e.target.value)}
+                                onChange={(e) =>
+                                  handleSectionChange(
+                                    idx,
+                                    "questionType",
+                                    e.target.value
+                                  )
+                                }
                               >
                                 <option value="single_mcq">Single MCQ</option>
-                                <option value="multiple_select">Multiple Select</option>
+                                <option value="multiple_select">
+                                  Multiple Select
+                                </option>
                                 <option value="true_false">True / False</option>
-                                <option value="fill_blanks">Fill in Blanks</option>
-                                <option value="short_answer">Short Answer</option>
+                                <option value="fill_blanks">
+                                  Fill in Blanks
+                                </option>
+                                <option value="short_answer">
+                                  Short Answer
+                                </option>
                                 <option value="long_answer">Long Answer</option>
                                 <option value="numerical">Numerical</option>
                               </select>
@@ -512,7 +664,13 @@ export default function ExamPatterns() {
                                 placeholder="Count"
                                 className="form-control form-control-sm"
                                 value={sec.numberOfQuestions}
-                                onChange={(e) => handleSectionChange(idx, 'numberOfQuestions', Number(e.target.value))}
+                                onChange={(e) =>
+                                  handleSectionChange(
+                                    idx,
+                                    "numberOfQuestions",
+                                    Number(e.target.value)
+                                  )
+                                }
                               />
                             </div>
                             <div className="col-md-2">
@@ -523,7 +681,13 @@ export default function ExamPatterns() {
                                 placeholder="Marks/Q"
                                 className="form-control form-control-sm"
                                 value={sec.marksPerQuestion}
-                                onChange={(e) => handleSectionChange(idx, 'marksPerQuestion', Number(e.target.value))}
+                                onChange={(e) =>
+                                  handleSectionChange(
+                                    idx,
+                                    "marksPerQuestion",
+                                    Number(e.target.value)
+                                  )
+                                }
                               />
                             </div>
                             <div className="col-md-1 text-end">
@@ -542,10 +706,17 @@ export default function ExamPatterns() {
                     </div>
                   </div>
                   <div className="modal-footer">
-                    <button type="button" className="btn btn-outline-secondary" onClick={() => setShowModal(false)}>
+                    <button
+                      type="button"
+                      className="btn btn-outline-secondary"
+                      onClick={() => setShowModal(false)}
+                    >
                       Cancel
                     </button>
-                    <button type="submit" className="btn btn-primary px-4 fw-semibold">
+                    <button
+                      type="submit"
+                      className="btn btn-primary px-4 fw-semibold"
+                    >
                       Save Pattern
                     </button>
                   </div>
@@ -557,50 +728,85 @@ export default function ExamPatterns() {
 
         {/* Assign Teachers Modal */}
         {assignModalPattern && (
-          <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 1060 }}>
+          <div
+            className="modal show d-block"
+            style={{ backgroundColor: "rgba(0,0,0,0.5)", zIndex: 1060 }}
+          >
             <div className="modal-dialog modal-dialog-centered">
               <div className="modal-content border-0 rounded-4 shadow">
                 <div className="modal-header">
-                  <h5 className="modal-title fw-bold">Assign Pattern to Teachers</h5>
-                  <button className="btn-close" onClick={() => setAssignModalPattern(null)} />
+                  <h5 className="modal-title fw-bold">
+                    Assign Pattern to Teachers
+                  </h5>
+                  <button
+                    className="btn-close"
+                    onClick={() => setAssignModalPattern(null)}
+                  />
                 </div>
                 <div className="modal-body p-4">
                   <p className="text-secondary small mb-3">
-                    Select teachers eligible to build exams using <strong>{assignModalPattern.name}</strong>:
+                    Select teachers eligible to build exams using{" "}
+                    <strong>{assignModalPattern.name}</strong>:
                   </p>
-                  <div className="d-flex flex-column gap-2" style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                  <div
+                    className="d-flex flex-column gap-2"
+                    style={{ maxHeight: "300px", overflowY: "auto" }}
+                  >
                     {teachers.map((t) => {
                       const isSelected = selectedTeacherIds.includes(t._id);
                       return (
                         <div
                           key={t._id}
                           className={`p-2 rounded-3 border d-flex justify-content-between align-items-center cursor-pointer ${
-                            isSelected ? 'bg-primary-subtle border-primary text-primary fw-semibold' : 'bg-light'
+                            isSelected
+                              ? "bg-primary-subtle border-primary text-primary fw-semibold"
+                              : "bg-light"
                           }`}
-                          style={{ cursor: 'pointer' }}
+                          style={{ cursor: "pointer" }}
                           onClick={() => {
                             if (isSelected) {
-                              setSelectedTeacherIds(selectedTeacherIds.filter((id) => id !== t._id));
+                              setSelectedTeacherIds(
+                                selectedTeacherIds.filter((id) => id !== t._id)
+                              );
                             } else {
-                              setSelectedTeacherIds([...selectedTeacherIds, t._id]);
+                              setSelectedTeacherIds([
+                                ...selectedTeacherIds,
+                                t._id,
+                              ]);
                             }
                           }}
                         >
                           <div>
                             <div>{t.name}</div>
-                            <small className="text-muted">{t.email} • {t.teacherProfile?.subject || 'Faculty'}</small>
+                            <small className="text-muted">
+                              {t.email} •{" "}
+                              {t.teacherProfile?.subject || "Faculty"}
+                            </small>
                           </div>
-                          <input type="checkbox" checked={isSelected} readOnly className="form-check-input" />
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            readOnly
+                            className="form-check-input"
+                          />
                         </div>
                       );
                     })}
                   </div>
                 </div>
                 <div className="modal-footer">
-                  <button type="button" className="btn btn-secondary" onClick={() => setAssignModalPattern(null)}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setAssignModalPattern(null)}
+                  >
                     Cancel
                   </button>
-                  <button type="button" className="btn btn-primary" onClick={handleSaveAssignment}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleSaveAssignment}
+                  >
                     Save Assignments
                   </button>
                 </div>
@@ -608,7 +814,6 @@ export default function ExamPatterns() {
             </div>
           </div>
         )}
-
       </main>
     </div>
   );
