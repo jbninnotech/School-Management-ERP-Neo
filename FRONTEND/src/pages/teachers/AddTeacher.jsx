@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Sidebar from '../../components/Sidebar.jsx';
+import SearchableSubjectSelect from '../../components/SearchableSubjectSelect.jsx';
 
 // Read API Base URL from .env
 const API_BASE_URL =
@@ -315,14 +316,12 @@ const AddTeacher = () => {
                   </div>
 
                   <div className="col-md-4">
-                    <label className="form-label small fw-semibold text-secondary">Subject Specialization</label>
-                    <input
-                      type="text"
-                      name="subject"
-                      className="form-control"
-                      placeholder="e.g. Mathematics / Physics"
-                      value={formData.subject}
-                      onChange={handleChange}
+                    <label className="form-label small fw-semibold text-secondary">Subject Specialization *</label>
+                    <SearchableSubjectSelect
+                      selectedSubject={formData.subject}
+                      onChange={(val) => setFormData({ ...formData, subject: val })}
+                      placeholder="Search and select subject..."
+                      required
                     />
                   </div>
 

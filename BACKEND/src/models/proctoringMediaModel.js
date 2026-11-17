@@ -42,6 +42,40 @@ const proctoringMediaSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    recordingStatus: {
+      type: String,
+      enum: ['recording', 'completed', 'interrupted', 'failed'],
+      default: 'completed',
+      index: true,
+    },
+    uploadStatus: {
+      type: String,
+      enum: ['uploaded', 'processing', 'failed'],
+      default: 'uploaded',
+      index: true,
+    },
+    studentName: {
+      type: String,
+      default: '',
+    },
+    classGrade: {
+      type: String,
+      default: '',
+    },
+    section: {
+      type: String,
+      default: '',
+    },
+    subject: {
+      type: String,
+      default: '',
+    },
+    startTime: {
+      type: Date,
+    },
+    endTime: {
+      type: Date,
+    },
     timestamp: {
       type: Date,
       default: Date.now,

@@ -112,12 +112,12 @@ router.post(
   uploadMem.single('chunk'),
   async (req, res, next) => {
     try {
-      const { attemptId, chunkIndex, durationSeconds } = req.body;
+      const { attemptId, chunkIndex, durationSeconds, recordingStatus = 'completed' } = req.body;
       if (!req.file || !attemptId) {
         return res.status(400).json({ success: false, message: 'Missing attemptId or video chunk file' });
       }
 
-      const attempt = await ExaminationAttempt.findById(attemptId);
+      const attempt = await ExaminationAttempt.findById(attemptId).populate('examination', 'classGrade subject title');
       if (!attempt) {
         return res.status(404).json({ success: false, message: 'Attempt not found' });
       }
@@ -128,19 +128,25 @@ router.post(
       }
 
       const uploadResult = await streamUploadToCloudinary(req.file.buffer, {
-        folder: `school_erp/exams/${attempt.examination}/${attemptId}`,
+        folder: `school_erp/exams/${attempt.examination?._id || attempt.examination}/${attemptId}`,
         resource_type: 'video',
       });
 
       const mediaRecord = await ProctoringMedia.create({
-        examination: attempt.examination,
+        examination: attempt.examination?._id || attempt.examination,
         attempt: attempt._id,
         student: req.user._id,
+        studentName: req.user.name || '',
+        classGrade: attempt.examination?.classGrade || req.user.studentProfile?.classGrade || '',
+        section: req.user.studentProfile?.section || '',
+        subject: attempt.examination?.subject || '',
         mediaType: 'video_chunk',
         mediaUrl: uploadResult.secure_url,
         publicId: uploadResult.public_id,
         chunkIndex: Number(chunkIndex) || 0,
         durationSeconds: Number(durationSeconds) || 0,
+        recordingStatus,
+        uploadStatus: 'uploaded',
         fileSize: req.file.size,
         mimeType: req.file.mimetype,
       });
@@ -228,6 +234,57 @@ router.get(
       res.status(200).json({
         success: true,
         data: media,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * 5. All Examination Video Recordings (Teacher & Admin Query Interface)
+ * Supports searching and filtering by studentName, classGrade, subject, examination, status
+ */
+router.get(
+  '/recordings',
+  protect,
+  authorize('superadmin', 'principal', 'admin', 'teacher'),
+  async (req, res, next) => {
+    try {
+      const { search, classGrade, subject, examination, recordingStatus, page = 1, limit = 25 } = req.query;
+      const filter = { mediaType: 'video_chunk', isDeleted: false };
+
+      if (examination) filter.examination = examination;
+      if (classGrade) filter.classGrade = classGrade;
+      if (subject) filter.subject = new RegExp(subject, 'i');
+      if (recordingStatus && recordingStatus !== 'all') filter.recordingStatus = recordingStatus;
+      if (search) {
+        filter.$or = [
+          { studentName: new RegExp(search, 'i') },
+          { subject: new RegExp(search, 'i') },
+        ];
+      }
+
+      const skip = (Number(page) - 1) * Number(limit);
+      const total = await ProctoringMedia.countDocuments(filter);
+      const recordings = await ProctoringMedia.find(filter)
+        .populate('student', 'name email schoolId studentProfile')
+        .populate('examination', 'title examCode classGrade subject')
+        .populate('attempt', 'attemptNumber status score isResultPublished')
+        .sort({ timestamp: -1 })
+        .skip(skip)
+        .limit(Number(limit))
+        .lean();
+
+      res.status(200).json({
+        success: true,
+        data: recordings,
+        pagination: {
+          total,
+          page: Number(page),
+          pages: Math.ceil(total / Number(limit)),
+          limit: Number(limit),
+        },
       });
     } catch (err) {
       next(err);

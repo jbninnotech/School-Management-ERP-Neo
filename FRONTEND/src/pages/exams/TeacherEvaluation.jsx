@@ -349,20 +349,28 @@ export default function TeacherEvaluation() {
                   {/* Header bar */}
                   <div className="border-bottom pb-3 mb-4 d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-3">
                     <div style={{ minWidth: 0 }}>
-                      <h5 className="fw-bold text-dark mb-1 fs-6">
-                        Candidate: {selectedAttempt.student?.name}
-                      </h5>
+                      <div className="d-flex align-items-center gap-2 mb-1">
+                        <h5 className="fw-bold text-dark mb-0 fs-6">
+                          Candidate: {selectedAttempt.student?.name}
+                        </h5>
+                        <span className={`badge ${
+                          selectedAttempt.status === 'result_published' ? 'bg-success' :
+                          selectedAttempt.status === 'evaluated' ? 'bg-info text-dark' :
+                          'bg-warning text-dark'
+                        }`}>
+                          {selectedAttempt.status?.replace('_', ' ')?.toUpperCase()}
+                        </span>
+                      </div>
                       <div className="small text-muted font-monospace">
-                        School ID: {selectedAttempt.student?.schoolId} • Roll #
-                        {selectedAttempt.student?.studentProfile?.rollNumber}
+                        School ID: {selectedAttempt.student?.schoolId} • Roll #{selectedAttempt.student?.studentProfile?.rollNumber || 'N/A'} • Class {selectedAttempt.examination?.classGrade}
                       </div>
                     </div>
 
                     <div className="d-flex flex-column flex-md-row align-items-stretch align-items-md-center gap-2 gap-md-3 w-100 w-md-auto">
-                      <div className="d-flex justify-content-between align-items-center d-md-block text-md-end bg-light rounded-3 px-3 py-2">
-                        <span className="small text-muted d-block">Score:</span>
+                      <div className="d-flex justify-content-between align-items-center d-md-block text-md-end bg-light rounded-3 px-3 py-2 border">
+                        <span className="small text-muted d-block" style={{ fontSize: '0.75rem' }}>Total Calculated:</span>
                         <span className="fs-5 fw-bold text-success font-monospace">
-                          {totalCalculated} / {examRecord?.totalMarks}
+                          {totalCalculated} / {examRecord?.totalMarks} Marks
                         </span>
                       </div>
                       <button
@@ -374,6 +382,48 @@ export default function TeacherEvaluation() {
                         <Save size={16} />{" "}
                         {saving ? "Saving..." : "Save Grading"}
                       </button>
+                    </div>
+                  </div>
+
+                  {/* Summary Metric Ribbon */}
+                  <div className="row g-2 mb-4">
+                    <div className="col-6 col-md-3">
+                      <div className="p-2 bg-light rounded border text-center">
+                        <div className="text-muted small" style={{ fontSize: '0.7rem' }}>Total Questions</div>
+                        <div className="fw-bold text-dark">{allExamQuestions.length}</div>
+                      </div>
+                    </div>
+                    <div className="col-6 col-md-3">
+                      <div className="p-2 bg-light rounded border text-center">
+                        <div className="text-muted small" style={{ fontSize: '0.7rem' }}>Attempted</div>
+                        <div className="fw-bold text-primary">
+                          {selectedAttempt.answers?.filter(a => a.studentAnswer !== undefined && a.studentAnswer !== null && a.studentAnswer !== '').length || 0}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="col-6 col-md-3">
+                      <div className="p-2 bg-light rounded border text-center">
+                        <div className="text-muted small" style={{ fontSize: '0.7rem' }}>Score Percentage</div>
+                        <div className="fw-bold text-success font-monospace">
+                          {examRecord?.totalMarks ? Math.round((totalCalculated / examRecord.totalMarks) * 100) : 0}%
+                        </div>
+                      </div>
+                    </div>
+                    <div className="col-6 col-md-3">
+                      <div className="p-2 bg-light rounded border text-center">
+                        <div className="text-muted small" style={{ fontSize: '0.7rem' }}>Grade</div>
+                        <div className="fw-bold text-dark">
+                          {(() => {
+                            const pct = examRecord?.totalMarks ? (totalCalculated / examRecord.totalMarks) * 100 : 0;
+                            if (pct >= 90) return 'A+';
+                            if (pct >= 80) return 'A';
+                            if (pct >= 70) return 'B';
+                            if (pct >= 60) return 'C';
+                            if (pct >= 50) return 'D';
+                            return 'F';
+                          })()}
+                        </div>
+                      </div>
                     </div>
                   </div>
 

@@ -1,5 +1,71 @@
 import mongoose from 'mongoose';
 
+const examinationSubsectionSchema = new mongoose.Schema(
+  {
+    id: { type: String, required: true },
+    title: { type: String, required: true }, // e.g. "Subsection A1 - Multiple Choice"
+    questionType: { type: String, default: 'single_mcq' },
+    marksPerQuestion: { type: Number, default: 1 },
+    negativeMarks: { type: Number, default: 0 },
+    instructions: { type: String, default: '' },
+    order: { type: Number, default: 0 },
+    questions: [
+      {
+        questionId: {
+          type: String,
+          default: function () {
+            return new mongoose.Types.ObjectId().toString();
+          },
+        },
+        questionText: { type: String, required: true },
+        questionType: { type: String, required: true },
+        difficulty: { type: String, default: 'medium' },
+        chapter: { type: String, default: '' },
+        topic: { type: String, default: '' },
+        unitId: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null },
+        topicId: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null },
+        subTopicId: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null },
+        childTopicId: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null },
+        marks: { type: Number, required: true, default: 1 },
+        negativeMarks: { type: Number, default: 0 },
+        instructionText: { type: String, default: '' },
+        passageText: { type: String, default: '' },
+        imageUrl: { type: String, default: '' },
+        options: [
+          {
+            id: { type: String },
+            text: { type: String },
+            imageUrl: { type: String, default: '' },
+          },
+        ],
+        matchPairs: [
+          {
+            id: { type: String },
+            left: { type: String },
+            right: { type: String },
+          },
+        ],
+        correctAnswer: {
+          type: mongoose.Schema.Types.Mixed,
+        },
+        numericalTolerance: {
+          type: Number,
+          default: 0,
+        },
+        explanation: {
+          type: String,
+          default: '',
+        },
+        order: {
+          type: Number,
+          default: 0,
+        },
+      },
+    ],
+  },
+  { _id: false }
+);
+
 const examinationSectionSchema = new mongoose.Schema(
   {
     id: { type: String, required: true },
@@ -7,6 +73,7 @@ const examinationSectionSchema = new mongoose.Schema(
     description: { type: String, default: '' },
     durationMinutes: { type: Number, default: 0 }, // 0 means uses overall exam duration
     totalMarks: { type: Number, default: 0 },
+    subsections: [examinationSubsectionSchema],
     questions: [
       {
         questionId: {

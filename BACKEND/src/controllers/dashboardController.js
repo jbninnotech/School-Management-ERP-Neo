@@ -31,20 +31,133 @@ export const getAdminDashboardStats = async (req, res, next) => {
 
     const totalExams = await Examination.countDocuments();
     const scheduledExams = await Examination.countDocuments({ status: { $in: ['scheduled', 'published'] } });
-    const liveExams = await Examination.countDocuments({ status: 'in_progress' });
+    const liveExams = await Examination.countDocuments({ status: { $in: ['in_progress', 'live'] } });
+    const completedExams = await Examination.countDocuments({ status: { $in: ['completed', 'results_published'] } });
+    
+    // Students currently writing exams
+    const studentsWriting = await ExaminationAttempt.countDocuments({ status: 'in_progress' });
+    
+    // Evaluated vs pending evaluation answer papers
+    const totalEvaluated = await ExaminationAttempt.countDocuments({ status: { $in: ['evaluated', 'result_published'] } });
+    const pendingEvaluations = await ExaminationAttempt.countDocuments({ status: { $in: ['evaluation_pending', 'submitted', 'auto_submitted'] } });
+
+    // Total distinct classes configured
+    const distinctClasses = await Examination.distinct('classGrade');
+    const totalClassesCount = distinctClasses.length || 15;
+
+    // Active teachers count
+    const activeTeachersCount = await User.countDocuments({ role: 'teacher', isActive: true });
+
+    // Class-wise active exams breakdown
+    const classWiseActiveExams = await Examination.aggregate([
+      { $match: { status: { $in: ['in_progress', 'live'] } } },
+      {
+        $group: {
+          _id: '$classGrade',
+          activeCount: { $sum: 1 },
+          exams: { $push: { title: '$title', subject: '$subject', section: '$sections' } }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+
+    // Live conducting examinations detail for Admin table
+    const liveExaminationsList = await Examination.find({ status: { $in: ['in_progress', 'live'] } })
+      .populate('createdBy', 'name email teacherProfile')
+      .lean();
+
+    const liveExamsWithDetails = await Promise.all(
+      liveExaminationsList.map(async (lx) => {
+        const writingCount = await ExaminationAttempt.countDocuments({ examination: lx._id, status: 'in_progress' });
+        const submittedCount = await ExaminationAttempt.countDocuments({
+          examination: lx._id,
+          status: { $in: ['submitted', 'auto_submitted', 'evaluation_pending', 'evaluated', 'result_published'] }
+        });
+        const totalRegistered = await User.countDocuments({
+          role: 'student',
+          'studentProfile.classGrade': lx.classGrade,
+        });
+
+        return {
+          _id: lx._id,
+          examName: lx.title,
+          classGrade: lx.classGrade,
+          section: (lx.sections && lx.sections.length > 0) ? lx.sections.join(', ') : 'All',
+          subject: lx.subject,
+          assignedTeacher: lx.createdBy?.name || 'Faculty Member',
+          teacherEmail: lx.createdBy?.email || '',
+          scheduledDate: lx.examDate || lx.startDate,
+          startTime: lx.startTime,
+          endTime: lx.endTime,
+          totalRegisteredStudents: totalRegistered,
+          studentsWriting: writingCount,
+          studentsSubmitted: submittedCount,
+          studentsAbsent: Math.max(0, totalRegistered - (writingCount + submittedCount)),
+          status: lx.status,
+        };
+      })
+    );
+
+    // Teacher monitoring: which teachers are conducting exams
+    const teacherExamActivity = await Examination.aggregate([
+      {
+        $group: {
+          _id: '$createdBy',
+          totalAssignedExams: { $sum: 1 },
+          activeExams: {
+            $sum: { $cond: [{ $in: ['$status', ['in_progress', 'live']] }, 1, 0] }
+          },
+          completedExams: {
+            $sum: { $cond: [{ $in: ['$status', ['completed', 'results_published']] }, 1, 0] }
+          },
+          classesHandled: { $addToSet: '$classGrade' },
+          subjectsHandled: { $addToSet: '$subject' },
+        }
+      },
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'teacherInfo'
+        }
+      },
+      { $unwind: { path: '$teacherInfo', preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          teacherId: '$_id',
+          teacherName: '$teacherInfo.name',
+          teacherEmail: '$teacherInfo.email',
+          totalAssignedExams: 1,
+          activeExams: 1,
+          completedExams: 1,
+          classesHandled: 1,
+          subjectsHandled: 1,
+        }
+      }
+    ]);
 
     res.status(200).json({
       success: true,
       message: 'Dashboard metrics retrieved successfully',
       data: {
         summaryCards: {
-          totalStudents: summary.student,
           totalTeachers: summary.teacher,
+          activeTeachers: activeTeachersCount,
+          totalStudents: summary.student,
+          totalClasses: totalClassesCount,
+          totalScheduledExams: scheduledExams,
+          currentlyConductingExams: liveExams,
+          completedExams,
+          studentsCurrentlyWriting: studentsWriting,
+          totalEvaluatedPapers: totalEvaluated,
+          pendingEvaluations,
           totalAdmins: summary.admin + summary.superadmin,
           totalExams,
-          scheduledExams,
-          liveExams,
         },
+        classWiseActiveExams,
+        liveExaminationsList: liveExamsWithDetails,
+        teacherExamActivity,
       },
     });
   } catch (error) {

@@ -159,14 +159,38 @@ export default function QuestionPaperBuilder() {
     const nextChar = String.fromCharCode(65 + sections.length);
     const newSec = {
       id: `sec_${Date.now()}`,
-      title: `Section ${nextChar} - Descriptive`,
-      description: '',
+      title: `SECTION ${nextChar} - DESCRIPTIVE QUESTIONS`,
+      description: 'Answer all questions in this section.',
       durationMinutes: 0,
       totalMarks: 0,
+      subsections: [],
       questions: [],
     };
     setSections([...sections, newSec]);
     setActiveSectionIdx(sections.length);
+  };
+
+  const handleAddSubsection = (secIdx) => {
+    const sec = sections[secIdx];
+    const subIdx = (sec.subsections?.length || 0) + 1;
+    const secLetter = sec.title?.match(/Section\s+([A-Z])/i)?.[1] || String.fromCharCode(65 + secIdx);
+    const newSub = {
+      id: `sub_${Date.now()}`,
+      title: `Subsection ${secLetter}${subIdx}`,
+      questionType: 'single_mcq',
+      marksPerQuestion: 2,
+      negativeMarks: 0,
+      instructions: 'Choose the single best option.',
+    };
+    const updated = [...sections];
+    updated[secIdx].subsections = [...(updated[secIdx].subsections || []), newSub];
+    setSections(updated);
+  };
+
+  const handleRemoveSubsection = (secIdx, subIdx) => {
+    const updated = [...sections];
+    updated[secIdx].subsections = updated[secIdx].subsections.filter((_, idx) => idx !== subIdx);
+    setSections(updated);
   };
 
   const handleDeleteSection = (index) => {
@@ -567,22 +591,22 @@ export default function QuestionPaperBuilder() {
 
         {/* Active Section Settings Accordion / Card */}
         <div className="card border-0 shadow-sm rounded-4 p-3 mb-4 bg-white">
-          <div className="row g-3 align-items-center">
+          <div className="row g-3 align-items-center mb-3">
             <div className="col-md-5">
-              <label className="form-label small fw-semibold text-secondary mb-1">Section Title</label>
+              <label className="form-label small fw-semibold text-secondary mb-1">Main Section Title</label>
               <input
                 type="text"
-                className="form-control form-control-sm"
+                className="form-control form-control-sm fw-bold text-uppercase"
                 value={activeSec?.title || ''}
                 onChange={(e) => handleUpdateSectionMeta('title', e.target.value)}
               />
             </div>
             <div className="col-md-5">
-              <label className="form-label small fw-semibold text-secondary mb-1">Section Description / Scope</label>
+              <label className="form-label small fw-semibold text-secondary mb-1">Section Instructions</label>
               <input
                 type="text"
                 className="form-control form-control-sm"
-                placeholder="e.g. All questions carry 2 marks each"
+                placeholder="e.g. Answer all objective questions. Negative marking applies."
                 value={activeSec?.description || ''}
                 onChange={(e) => handleUpdateSectionMeta('description', e.target.value)}
               />
@@ -596,6 +620,52 @@ export default function QuestionPaperBuilder() {
                 <Trash2 size={14} /> Remove Section
               </button>
             </div>
+          </div>
+
+          {/* Subsections Strip */}
+          <div className="border-top pt-3">
+            <div className="d-flex justify-content-between align-items-center mb-2">
+              <span className="small fw-bold text-secondary text-uppercase d-flex align-items-center gap-1">
+                <Layers size={13} className="text-primary" /> Subsections Configuration
+              </span>
+              <button
+                type="button"
+                className="btn btn-outline-primary btn-sm py-0 px-2"
+                style={{ fontSize: '0.75rem' }}
+                onClick={() => handleAddSubsection(activeSectionIdx)}
+              >
+                <Plus size={12} className="me-1" /> Add Subsection
+              </button>
+            </div>
+
+            {(activeSec?.subsections || []).length === 0 ? (
+              <div className="text-muted small fst-italic py-1" style={{ fontSize: '0.75rem' }}>
+                No nested subsections created. Questions are organized directly under this main section. Click "+ Add Subsection" to divide into Subsection A1, A2, etc.
+              </div>
+            ) : (
+              <div className="d-flex flex-wrap gap-2">
+                {activeSec.subsections.map((sub, sIdx) => (
+                  <div
+                    key={sub.id || sIdx}
+                    className="p-2 bg-light border rounded-3 d-flex align-items-center gap-2 small"
+                  >
+                    <span className="fw-bold text-dark">{sub.title}</span>
+                    <span className="badge bg-secondary-subtle text-secondary" style={{ fontSize: '0.7rem' }}>
+                      {sub.questionType?.replace(/_/g, ' ')}
+                    </span>
+                    <span className="badge bg-success-subtle text-success" style={{ fontSize: '0.7rem' }}>
+                      {sub.marksPerQuestion} Marks
+                    </span>
+                    <button
+                      type="button"
+                      className="btn-close ms-1"
+                      style={{ transform: 'scale(0.7)' }}
+                      onClick={() => handleRemoveSubsection(activeSectionIdx, sIdx)}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

@@ -57,10 +57,21 @@ export default function Dashboard() {
   const [adminStats, setAdminStats] = useState({
     totalStudents: 0,
     totalTeachers: 0,
+    activeTeachers: 0,
+    totalClasses: 0,
     totalAdmins: 0,
     totalExams: 0,
-    scheduledExams: 0,
-    liveExams: 0,
+    totalScheduledExams: 0,
+    currentlyConductingExams: 0,
+    completedExams: 0,
+    studentsCurrentlyWriting: 0,
+    totalEvaluatedPapers: 0,
+    pendingEvaluations: 0,
+  });
+  const [adminLiveData, setAdminLiveData] = useState({
+    classWiseActiveExams: [],
+    liveExaminationsList: [],
+    teacherExamActivity: [],
   });
 
   // Teacher Data State
@@ -132,6 +143,11 @@ export default function Dashboard() {
         const res = await API.get('/dashboard/admin');
         if (res.data?.success) {
           setAdminStats(res.data.data?.summaryCards || {});
+          setAdminLiveData({
+            classWiseActiveExams: res.data.data?.classWiseActiveExams || [],
+            liveExaminationsList: res.data.data?.liveExaminationsList || [],
+            teacherExamActivity: res.data.data?.teacherExamActivity || [],
+          });
         }
       } else if (isTeacher) {
         const res = await API.get('/dashboard/teacher');
@@ -1435,63 +1451,162 @@ export default function Dashboard() {
               </Link>
             </div>
 
+            {/* 10 Professional Admin Metric Cards */}
             <div className="row g-2 g-md-3 mb-4">
-              <div className="col-6 col-sm-6 col-xl-3">
+              <div className="col-6 col-sm-4 col-xl">
                 <div className="card p-3 h-100 border-0 shadow-sm rounded-4 bg-white kpi-card-hover" style={{ border: '1px solid #e2e8f0' }}>
-                  <div className="d-flex justify-content-between align-items-center">
-                    <div>
-                      <span className="text-muted small text-uppercase fw-semibold" style={{ fontSize: '10px' }}>Students</span>
-                      <p className="h3 fw-bold text-dark my-1">{loading ? '...' : adminStats.totalStudents}</p>
-                    </div>
-                    <div className="rounded-3 p-3" style={{ backgroundColor: '#eff6ff', color: '#2563eb' }}>
-                      <GraduationCap size={24} />
-                    </div>
-                  </div>
+                  <span className="text-muted small text-uppercase fw-semibold" style={{ fontSize: '10px' }}>Total Teachers</span>
+                  <p className="h3 fw-bold text-dark my-1">{loading ? '...' : adminStats.totalTeachers}</p>
+                  <small className="text-success fw-medium" style={{ fontSize: '11px' }}>{adminStats.activeTeachers || adminStats.totalTeachers} Active</small>
                 </div>
               </div>
 
-              <div className="col-6 col-sm-6 col-xl-3">
+              <div className="col-6 col-sm-4 col-xl">
                 <div className="card p-3 h-100 border-0 shadow-sm rounded-4 bg-white kpi-card-hover" style={{ border: '1px solid #e2e8f0' }}>
-                  <div className="d-flex justify-content-between align-items-center">
-                    <div>
-                      <span className="text-muted small text-uppercase fw-semibold" style={{ fontSize: '10px' }}>Faculty</span>
-                      <p className="h3 fw-bold text-dark my-1">{loading ? '...' : adminStats.totalTeachers}</p>
-                    </div>
-                    <div className="rounded-3 p-3" style={{ backgroundColor: '#eff6ff', color: '#2563eb' }}>
-                      <Users size={24} />
-                    </div>
-                  </div>
+                  <span className="text-muted small text-uppercase fw-semibold" style={{ fontSize: '10px' }}>Total Students</span>
+                  <p className="h3 fw-bold text-dark my-1">{loading ? '...' : adminStats.totalStudents}</p>
+                  <small className="text-primary fw-medium" style={{ fontSize: '11px' }}>Enrolled</small>
                 </div>
               </div>
 
-              <div className="col-6 col-sm-6 col-xl-3">
+              <div className="col-6 col-sm-4 col-xl">
                 <div className="card p-3 h-100 border-0 shadow-sm rounded-4 bg-white kpi-card-hover" style={{ border: '1px solid #e2e8f0' }}>
-                  <div className="d-flex justify-content-between align-items-center">
-                    <div>
-                      <span className="text-muted small text-uppercase fw-semibold" style={{ fontSize: '10px' }}>Total Papers</span>
-                      <p className="h3 fw-bold text-dark my-1">{loading ? '...' : adminStats.totalExams}</p>
-                    </div>
-                    <div className="rounded-3 p-3" style={{ backgroundColor: '#ecfdf5', color: '#059669' }}>
-                      <BookOpen size={24} />
-                    </div>
-                  </div>
+                  <span className="text-muted small text-uppercase fw-semibold" style={{ fontSize: '10px' }}>Total Classes</span>
+                  <p className="h3 fw-bold text-dark my-1">{loading ? '...' : adminStats.totalClasses || 15}</p>
+                  <small className="text-secondary fw-medium" style={{ fontSize: '11px' }}>Curriculum</small>
                 </div>
               </div>
 
-              <div className="col-6 col-sm-6 col-xl-3">
+              <div className="col-6 col-sm-4 col-xl">
                 <div className="card p-3 h-100 border-0 shadow-sm rounded-4 bg-white kpi-card-hover" style={{ border: '1px solid #e2e8f0' }}>
-                  <div className="d-flex justify-content-between align-items-center">
-                    <div>
-                      <span className="text-muted small text-uppercase fw-semibold" style={{ fontSize: '10px' }}>Scheduled</span>
-                      <p className="h3 fw-bold text-primary my-1">{loading ? '...' : adminStats.scheduledExams}</p>
-                    </div>
-                    <div className="rounded-3 p-3" style={{ backgroundColor: '#eff6ff', color: '#2563eb' }}>
-                      <Calendar size={24} />
-                    </div>
-                  </div>
+                  <span className="text-muted small text-uppercase fw-semibold" style={{ fontSize: '10px' }}>Scheduled Exams</span>
+                  <p className="h3 fw-bold text-primary my-1">{loading ? '...' : (adminStats.totalScheduledExams || adminStats.scheduledExams)}</p>
+                  <small className="text-primary fw-medium" style={{ fontSize: '11px' }}>Upcoming</small>
+                </div>
+              </div>
+
+              <div className="col-6 col-sm-4 col-xl">
+                <div className="card p-3 h-100 border-0 shadow-sm rounded-4 bg-white kpi-card-hover" style={{ border: '1px solid #e2e8f0' }}>
+                  <span className="text-muted small text-uppercase fw-semibold" style={{ fontSize: '10px' }}>Live Exams</span>
+                  <p className="h3 fw-bold text-danger my-1 animate-pulse">{loading ? '...' : (adminStats.currentlyConductingExams || adminStats.liveExams)}</p>
+                  <small className="text-danger fw-bold" style={{ fontSize: '11px' }}>Conducting</small>
+                </div>
+              </div>
+
+              <div className="col-6 col-sm-4 col-xl">
+                <div className="card p-3 h-100 border-0 shadow-sm rounded-4 bg-white kpi-card-hover" style={{ border: '1px solid #e2e8f0' }}>
+                  <span className="text-muted small text-uppercase fw-semibold" style={{ fontSize: '10px' }}>Students Writing</span>
+                  <p className="h3 fw-bold text-warning-emphasis my-1">{loading ? '...' : (adminStats.studentsCurrentlyWriting || 0)}</p>
+                  <small className="text-warning fw-medium" style={{ fontSize: '11px' }}>In Session</small>
+                </div>
+              </div>
+
+              <div className="col-6 col-sm-4 col-xl">
+                <div className="card p-3 h-100 border-0 shadow-sm rounded-4 bg-white kpi-card-hover" style={{ border: '1px solid #e2e8f0' }}>
+                  <span className="text-muted small text-uppercase fw-semibold" style={{ fontSize: '10px' }}>Evaluated Papers</span>
+                  <p className="h3 fw-bold text-success my-1">{loading ? '...' : (adminStats.totalEvaluatedPapers || 0)}</p>
+                  <small className="text-success fw-medium" style={{ fontSize: '11px' }}>Completed</small>
+                </div>
+              </div>
+
+              <div className="col-6 col-sm-4 col-xl">
+                <div className="card p-3 h-100 border-0 shadow-sm rounded-4 bg-white kpi-card-hover" style={{ border: '1px solid #e2e8f0' }}>
+                  <span className="text-muted small text-uppercase fw-semibold" style={{ fontSize: '10px' }}>Pending Evaluations</span>
+                  <p className="h3 fw-bold text-info my-1">{loading ? '...' : (adminStats.pendingEvaluations || 0)}</p>
+                  <small className="text-info fw-medium" style={{ fontSize: '11px' }}>Awaiting Review</small>
                 </div>
               </div>
             </div>
+
+            {/* Class-Wise Active Examinations Badges */}
+            <div className="card border-0 shadow-sm rounded-4 p-3 mb-4 bg-white">
+              <div className="d-flex align-items-center justify-content-between mb-2">
+                <h6 className="fw-bold text-dark mb-0 d-flex align-items-center gap-2">
+                  <Radio size={16} className="text-danger animate-pulse" />
+                  Live Class-Wise Examination Activity
+                </h6>
+                <span className="badge bg-danger-subtle text-danger" style={{ fontSize: '0.75rem' }}>
+                  {adminLiveData.classWiseActiveExams.length} Classes Active
+                </span>
+              </div>
+              <div className="d-flex flex-wrap gap-2 pt-1">
+                {adminLiveData.classWiseActiveExams.length === 0 ? (
+                  <span className="text-muted small py-1 fst-italic">
+                    No classes are currently conducting live examinations at this moment.
+                  </span>
+                ) : (
+                  adminLiveData.classWiseActiveExams.map((cls) => (
+                    <div
+                      key={cls._id}
+                      className="px-3 py-2 bg-light rounded-3 border d-flex align-items-center gap-2"
+                    >
+                      <span className="fw-bold text-dark">{cls._id}</span>
+                      <span className="badge bg-danger text-white rounded-pill">
+                        {cls.activeCount} Active Exam{cls.activeCount > 1 ? 's' : ''}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Live Conducting Examinations Real-Time Table */}
+            {adminLiveData.liveExaminationsList.length > 0 && (
+              <div className="card border-0 shadow-sm rounded-4 mb-4 bg-white overflow-hidden">
+                <div className="p-3 border-bottom d-flex justify-content-between align-items-center">
+                  <h6 className="fw-bold text-dark mb-0">Currently Conducting Examinations</h6>
+                  <span className="badge bg-danger text-white">LIVE MONITOR</span>
+                </div>
+                <div className="table-responsive">
+                  <table className="table table-hover mb-0 align-middle">
+                    <thead className="table-light small">
+                      <tr>
+                        <th>Examination</th>
+                        <th>Class & Section</th>
+                        <th>Subject</th>
+                        <th>Assigned Faculty</th>
+                        <th>Students Writing</th>
+                        <th>Submitted</th>
+                        <th>Status</th>
+                        <th className="text-end">Monitor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adminLiveData.liveExaminationsList.map((lx) => (
+                        <tr key={lx._id}>
+                          <td className="fw-semibold text-dark">{lx.examName}</td>
+                          <td>
+                            <span className="badge bg-primary-subtle text-primary">
+                              {lx.classGrade} ({lx.section})
+                            </span>
+                          </td>
+                          <td>{lx.subject}</td>
+                          <td>
+                            <div className="small fw-medium text-dark">{lx.assignedTeacher}</div>
+                            <small className="text-muted">{lx.teacherEmail}</small>
+                          </td>
+                          <td className="fw-bold text-warning-emphasis">{lx.studentsWriting}</td>
+                          <td className="fw-bold text-success">{lx.studentsSubmitted}</td>
+                          <td>
+                            <span className="badge bg-danger text-white animate-pulse">
+                              LIVE
+                            </span>
+                          </td>
+                          <td className="text-end">
+                            <button
+                              className="btn btn-outline-primary btn-sm rounded-3 py-1 px-2"
+                              onClick={() => navigate(`/exams/${lx._id}/monitor`)}
+                            >
+                              Open Live Feed
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {/* Quick Links Grid */}
             <div className="row g-3">

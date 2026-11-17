@@ -61,3 +61,62 @@ export const updateAcademicStructure = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * GET /api/academic/subjects (or /api/subjects)
+ * Returns dynamic list of subjects from academic structure
+ * Supports query params: classGrade, academicYear, search
+ */
+export const getSubjects = async (req, res, next) => {
+  try {
+    const { classGrade, search, academicYear = '2025-2026' } = req.query;
+    let structure = await AcademicStructure.findOne({ isDefault: true });
+
+    if (!structure) {
+      structure = await AcademicStructure.create({
+        academicYear,
+        classes: DEFAULT_CLASSES,
+        isDefault: true,
+      });
+    }
+
+    let subjectsSet = new Set();
+    const classList = structure.classes || [];
+
+    if (classGrade) {
+      const targetClass = classList.find(
+        (c) => c.name.toLowerCase() === classGrade.toLowerCase() || c.code?.toLowerCase() === classGrade.toLowerCase()
+      );
+      if (targetClass && targetClass.subjects) {
+        targetClass.subjects.forEach((s) => subjectsSet.add(s));
+      }
+    } else {
+      classList.forEach((c) => {
+        if (c.subjects) {
+          c.subjects.forEach((s) => subjectsSet.add(s));
+        }
+      });
+    }
+
+    let result = Array.from(subjectsSet).map((subName) => ({
+      name: subName,
+      code: subName.substring(0, 4).toUpperCase(),
+      isActive: true,
+    }));
+
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter((item) => item.name.toLowerCase().includes(q));
+    }
+
+    result.sort((a, b) => a.name.localeCompare(b.name));
+
+    res.status(200).json({
+      success: true,
+      count: result.length,
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import API from '../../api/api.js';
 import CameraProctor from '../../components/CameraProctor.jsx';
+import ExamVideoRecorder from '../../components/ExamVideoRecorder.jsx';
 import ExamErrorBoundary from '../../components/ExamErrorBoundary.jsx';
 import SafeCalculator from '../../components/SafeCalculator.jsx';
 import RoughWorkPanel from '../../components/RoughWorkPanel.jsx';
@@ -61,6 +62,7 @@ export default function StudentExamInterface() {
   const heartbeatIntervalRef = useRef(null);
   const lastViolationTimeRef = useRef(0);
   const seqRef = useRef(1);
+  const [activeMediaStream, setActiveMediaStream] = useState(null);
 
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [permissionError, setPermissionError] = useState('');
@@ -1132,12 +1134,21 @@ export default function StudentExamInterface() {
               <span className="small fw-bold text-dark d-flex align-items-center gap-1">
                 <Camera size={14} className="text-primary" /> Live Proctoring
               </span>
+              <ExamVideoRecorder
+                stream={activeMediaStream}
+                attemptId={attempt?._id}
+                isExamActive={attempt?.status === 'in_progress'}
+                chunkIntervalMs={15000}
+              />
             </div>
             <CameraProctor
               mode="during_exam"
               required={false}
               showPreview={true}
               onFaceStateChange={handleFaceProctorState}
+              onStatusChange={(status, stream) => {
+                if (stream) setActiveMediaStream(stream);
+              }}
             />
           </div>
 

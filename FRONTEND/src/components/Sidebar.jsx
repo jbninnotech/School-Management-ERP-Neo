@@ -17,7 +17,8 @@ import {
   Award,
   Bell,
   Layers,
-  CalendarCheck2
+  CalendarCheck2,
+  Video
 } from 'lucide-react';
 
 export default function Sidebar({ user }) {
@@ -415,6 +416,18 @@ export default function Sidebar({ user }) {
             <span className="text-truncate">Live Exams</span>
             <span style={styles.badgeLive}>LIVE</span>
           </Link>
+
+          {role !== 'student' && (
+            <Link
+              to="/exams/recordings"
+              className="sidebar-item-link"
+              style={styles.navLink(isCurrentPath('/exams/recordings'))}
+              onClick={() => setIsMobileOpen(false)}
+            >
+              <Video className="me-2 text-cyan-400 flex-shrink-0" size={16} />
+              <span className="text-truncate">Exam Recordings</span>
+            </Link>
+          )}
 
           {canManageExams && (
             <Link

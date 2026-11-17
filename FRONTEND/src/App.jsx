@@ -23,6 +23,7 @@ import ExamResultsDashboard from './pages/exams/ExamResultsDashboard.jsx';
 import StudentResultView from './pages/exams/StudentResultView.jsx';
 import StudentReport from './pages/exams/StudentReport.jsx';
 import ExamPatterns from './pages/exams/ExamPatterns.jsx';
+import VideoRecordingsManager from './pages/exams/VideoRecordingsManager.jsx';
 import NotificationPage from './pages/notifications/NotificationPage.jsx';
 import LeaveManagement from './pages/leaves/LeaveManagement.jsx';
 
@@ -161,6 +162,16 @@ export default function App() {
           element={
             <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
               <ExamPatterns />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Video Recordings Management */}
+        <Route
+          path="/exams/recordings"
+          element={
+            <ProtectedRoute allowedRoles={['superadmin', 'principal', 'admin', 'teacher']}>
+              <VideoRecordingsManager />
             </ProtectedRoute>
           }
         />
