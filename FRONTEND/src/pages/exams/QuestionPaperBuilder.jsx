@@ -25,6 +25,22 @@ import {
   HelpCircle
 } from 'lucide-react';
 
+// Shared responsive styles (used by both the loading screen and the main view)
+const responsiveStyles = `
+  .qpb-main { margin-left: 260px; padding: 24px 32px; }
+  .qpb-header { position: sticky; top: 8px; z-index: 1020; }
+  @media (max-width: 991.98px) {
+    .qpb-main { margin-left: 0; padding: 16px; }
+  }
+  @media (max-width: 575.98px) {
+    .qpb-main { padding: 12px; }
+    .qpb-actions .btn { flex: 1 1 100%; justify-content: center; }
+  }
+`;
+
+// Replaces ALL underscores (e.g. "match_following" -> "match following")
+const formatType = (t) => (t ? t.replace(/_/g, ' ') : '');
+
 export default function QuestionPaperBuilder() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -155,7 +171,7 @@ export default function QuestionPaperBuilder() {
 
   const handleDeleteSection = (index) => {
     if (sections.length <= 1) {
-      alert('Examination must have at least one section.');
+      window.alert('Examination must have at least one section.');
       return;
     }
     if (window.confirm('Are you sure you want to remove this entire section and its questions?')) {
@@ -196,7 +212,7 @@ export default function QuestionPaperBuilder() {
 
   const handleSaveQuestionToSection = () => {
     if (!questionForm.questionText.trim()) {
-      alert('Please enter question text');
+      window.alert('Please enter question text');
       return;
     }
 
@@ -225,11 +241,22 @@ export default function QuestionPaperBuilder() {
     setSections(updatedSections);
   };
 
+  // Deep-copies nested arrays so editing the copy never changes the original
   const handleDuplicateQuestion = (qIdx) => {
     const q = sections[activeSectionIdx].questions[qIdx];
-    const copy = { ...q, questionText: `${q.questionText} (Copy)` };
-    const updatedSections = [...sections];
-    updatedSections[activeSectionIdx].questions.splice(qIdx + 1, 0, copy);
+    const copy = {
+      ...q,
+      questionId: undefined,
+      questionText: `${q.questionText} (Copy)`,
+      options: q.options ? q.options.map((o) => ({ ...o })) : q.options,
+      matchPairs: q.matchPairs ? q.matchPairs.map((p) => ({ ...p })) : q.matchPairs,
+      correctAnswer: Array.isArray(q.correctAnswer) ? [...q.correctAnswer] : q.correctAnswer,
+    };
+    const updatedSections = sections.map((s, i) =>
+      i === activeSectionIdx
+        ? { ...s, questions: [...s.questions.slice(0, qIdx + 1), copy, ...s.questions.slice(qIdx + 1)] }
+        : s
+    );
     setSections(updatedSections);
   };
 
@@ -277,7 +304,7 @@ export default function QuestionPaperBuilder() {
       );
       setBankQuestions(res.data?.data || []);
     } catch (err) {
-      alert('Failed to load Question Bank: ' + err.message);
+      window.alert('Failed to load Question Bank: ' + err.message);
     } finally {
       setBankLoading(false);
     }
@@ -322,7 +349,7 @@ export default function QuestionPaperBuilder() {
 
       const selected = res.data?.data || [];
       if (selected.length === 0) {
-        alert('No approved questions found in bank matching this criteria.');
+        window.alert('No approved questions found in bank matching this criteria.');
         return;
       }
 
@@ -353,7 +380,7 @@ export default function QuestionPaperBuilder() {
         message: `Blueprint generated: ${formatted.length} questions populated into active section!`,
       });
     } catch (err) {
-      alert('Blueprint generation error: ' + (err.response?.data?.message || err.message));
+      window.alert('Blueprint generation error: ' + (err.response?.data?.message || err.message));
     } finally {
       setSaving(false);
     }
@@ -364,7 +391,7 @@ export default function QuestionPaperBuilder() {
     setSaving(true);
     setAlert({ type: '', message: '' });
     try {
-      const res = await API.put(`/exams/${id}/paper`, {
+      await API.put(`/exams/${id}/paper`, {
         examSections: sections,
         totalMarks: calculatedTotalMarks,
       });
@@ -395,8 +422,9 @@ export default function QuestionPaperBuilder() {
   if (loading) {
     return (
       <div style={{ backgroundColor: '#f8fafc', minHeight: '100vh' }}>
+        <style>{responsiveStyles}</style>
         <Sidebar user={currentUser} />
-        <main style={{ marginLeft: '260px', padding: '60px', textAlign: 'center' }}>
+        <main className="qpb-main text-center" style={{ paddingTop: '60px' }}>
           <div className="spinner-border text-primary" role="status" />
           <p className="mt-2 text-muted">Loading Question Paper Canvas...</p>
         </main>
@@ -408,40 +436,48 @@ export default function QuestionPaperBuilder() {
 
   return (
     <div style={{ backgroundColor: '#f8fafc', minHeight: '100vh' }}>
+      <style>{responsiveStyles}</style>
       <Sidebar user={currentUser} />
-      <main style={{ marginLeft: '260px', padding: '24px 32px' }}>
+      <main className="qpb-main">
 
-        {/* Top Sticky Header */}
-        <div className="bg-white p-3 rounded-4 shadow-sm mb-4 border d-flex flex-wrap justify-content-between align-items-center gap-3">
-          <div>
-            <div className="d-flex align-items-center gap-2 mb-1">
-              <span className="badge bg-light text-dark border font-monospace">{exam?.examCode}</span>
-              <span className="badge bg-primary-subtle text-primary border border-primary-subtle">
-                {exam?.classGrade} • {exam?.subject}
-              </span>
-              <span className="badge bg-secondary-subtle text-secondary text-uppercase">{exam?.status}</span>
+        {/* Top Sticky Header (responsive) */}
+        <div className="qpb-header bg-white p-3 rounded-4 shadow-sm mb-4 border">
+          <div className="row g-3 align-items-center">
+            <div className="col-12 col-lg">
+              <div className="d-flex flex-wrap align-items-center gap-2 mb-2">
+                <span className="badge bg-light text-dark border font-monospace">{exam?.examCode}</span>
+                <span className="badge bg-primary-subtle text-primary border border-primary-subtle text-wrap text-start">
+                  {exam?.classGrade} • {exam?.subject}
+                </span>
+                <span className="badge bg-secondary-subtle text-secondary text-uppercase">{exam?.status}</span>
+              </div>
+              <h4 className="fw-bold mb-0 text-dark text-break fs-5">{exam?.title}</h4>
             </div>
-            <h4 className="fw-bold mb-0 text-dark">{exam?.title}</h4>
-          </div>
 
-          <div className="d-flex flex-wrap align-items-center gap-2">
-            <button className="btn btn-outline-dark btn-sm rounded-3 d-flex align-items-center gap-1" onClick={() => setShowPreviewModal(true)}>
-              <Eye size={15} /> Official Preview
-            </button>
-            <button
-              className="btn btn-outline-primary btn-sm rounded-3 d-flex align-items-center gap-1"
-              onClick={() => handleSaveQuestionPaper(false)}
-              disabled={saving}
-            >
-              <Save size={15} /> Save Draft
-            </button>
-            <button
-              className="btn btn-success btn-sm rounded-3 d-flex align-items-center gap-1 shadow-sm px-3"
-              onClick={() => handleSaveQuestionPaper(true)}
-              disabled={saving || totalQuestionsCount === 0}
-            >
-              <Send size={15} /> Submit for Approval
-            </button>
+            <div className="col-12 col-lg-auto">
+              <div className="qpb-actions d-flex flex-wrap align-items-center gap-2">
+                <button
+                  className="btn btn-outline-dark btn-sm rounded-3 d-flex align-items-center gap-1"
+                  onClick={() => setShowPreviewModal(true)}
+                >
+                  <Eye size={15} /> Official Preview
+                </button>
+                <button
+                  className="btn btn-outline-primary btn-sm rounded-3 d-flex align-items-center gap-1"
+                  onClick={() => handleSaveQuestionPaper(false)}
+                  disabled={saving}
+                >
+                  <Save size={15} /> {saving ? 'Saving...' : 'Save Draft'}
+                </button>
+                <button
+                  className="btn btn-success btn-sm rounded-3 d-flex align-items-center gap-1 shadow-sm px-3"
+                  onClick={() => handleSaveQuestionPaper(true)}
+                  disabled={saving || totalQuestionsCount === 0}
+                >
+                  <Send size={15} /> Submit for Approval
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -551,7 +587,7 @@ export default function QuestionPaperBuilder() {
                 onChange={(e) => handleUpdateSectionMeta('description', e.target.value)}
               />
             </div>
-            <div className="col-md-2 text-end pt-3">
+            <div className="col-md-2 text-md-end pt-md-3">
               <button
                 className="btn btn-outline-danger btn-sm rounded-3"
                 onClick={() => handleDeleteSection(activeSectionIdx)}
@@ -563,34 +599,35 @@ export default function QuestionPaperBuilder() {
           </div>
         </div>
 
-        {/* Question Cards List */}
-        {activeSec?.questions?.length === 0 ? (
-          <div className="card border-0 shadow-sm rounded-4 p-5 text-center bg-white">
+        {/* Question Cards List (responsive) */}
+        {(activeSec?.questions?.length || 0) === 0 ? (
+          <div className="card border-0 shadow-sm rounded-4 p-4 p-md-5 text-center bg-white">
             <HelpCircle size={44} className="text-secondary opacity-50 mx-auto mb-2" />
             <h6 className="fw-semibold text-dark">No questions in this section yet</h6>
             <p className="text-muted small mb-3">
               Create a custom question, insert approved questions from your bank, or use the auto-blueprint generator.
             </p>
-            <div className="d-flex justify-content-center gap-2">
+            <div className="d-flex flex-wrap justify-content-center gap-2">
               <button className="btn btn-primary btn-sm rounded-3 px-3" onClick={handleOpenAddQuestion}>
-                <Plus size={14} className="me-1 inline" /> Create Question
+                <Plus size={14} className="me-1" /> Create Question
               </button>
               <button className="btn btn-outline-secondary btn-sm rounded-3 px-3" onClick={handleOpenBankModal}>
-                <Database size={14} className="me-1 inline" /> From Question Bank
+                <Database size={14} className="me-1" /> From Question Bank
               </button>
             </div>
           </div>
         ) : (
           <div className="d-flex flex-column gap-3">
             {activeSec.questions.map((q, qIdx) => (
-              <div key={qIdx} className="card border-0 shadow-sm rounded-4 p-4 bg-white">
-                <div className="d-flex justify-content-between align-items-start gap-3">
-                  <div className="d-flex align-items-center gap-2">
+              <div key={q.id || q._id || q.questionId || qIdx} className="card border-0 shadow-sm rounded-4 p-3 p-md-4 bg-white">
+                {/* Card header: badges + actions (stacks on small screens) */}
+                <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-start gap-2 gap-md-3">
+                  <div className="d-flex flex-wrap align-items-center gap-2">
                     <span className="badge bg-light text-dark border fw-bold">Q{qIdx + 1}</span>
                     <span className="badge bg-primary-subtle text-primary border border-primary-subtle text-uppercase">
-                      {q.questionType?.replace('_', ' ')}
+                      {formatType(q.questionType)}
                     </span>
-                    <span className="badge bg-secondary-subtle text-secondary">{q.difficulty}</span>
+                    <span className="badge bg-secondary-subtle text-secondary text-capitalize">{q.difficulty}</span>
                     <span className="badge bg-success-subtle text-success">+{q.marks} Marks</span>
                     {q.negativeMarks > 0 && (
                       <span className="badge bg-danger-subtle text-danger">-{q.negativeMarks} Neg</span>
@@ -598,7 +635,7 @@ export default function QuestionPaperBuilder() {
                   </div>
 
                   {/* Move & Actions */}
-                  <div className="d-flex align-items-center gap-1">
+                  <div className="d-flex flex-wrap align-items-center gap-1 flex-shrink-0">
                     <button
                       className="btn btn-light btn-sm p-1"
                       onClick={() => handleMoveQuestion(qIdx, -1)}
@@ -623,7 +660,7 @@ export default function QuestionPaperBuilder() {
                       <Copy size={15} />
                     </button>
                     <button
-                      className="btn btn-light btn-sm p-1 text-primary"
+                      className="btn btn-light btn-sm px-2 py-1 text-primary"
                       onClick={() => handleOpenEditQuestion(qIdx)}
                       title="Edit Question"
                     >
@@ -641,27 +678,40 @@ export default function QuestionPaperBuilder() {
 
                 {/* Question Body */}
                 <div className="mt-3">
-                  <p className="fw-semibold text-dark mb-2" style={{ whiteSpace: 'pre-wrap' }}>
+                  {q.passageText && (
+                    <div
+                      className="p-2 mb-2 rounded-3 bg-light border-start border-3 border-secondary small text-break"
+                      style={{ whiteSpace: 'pre-wrap' }}
+                    >
+                      {q.passageText}
+                    </div>
+                  )}
+
+                  <p className="fw-semibold text-dark mb-2 text-break" style={{ whiteSpace: 'pre-wrap' }}>
                     {q.questionText}
                   </p>
 
+                  {q.imageUrl && (
+                    <img src={q.imageUrl} alt="Question diagram" className="img-fluid rounded my-2" style={{ maxHeight: 220 }} />
+                  )}
+
                   {/* Options display for MCQs */}
                   {['single_mcq', 'multiple_select', 'assertion_reason'].includes(q.questionType) && q.options && (
-                    <div className="row g-2 mt-1 ps-2">
+                    <div className="row g-2 mt-1">
                       {q.options.map((opt, optIdx) => {
                         const isCorrect = Array.isArray(q.correctAnswer)
                           ? q.correctAnswer.includes(opt.id)
                           : q.correctAnswer === opt.id;
                         return (
-                          <div key={opt.id || optIdx} className="col-md-6">
+                          <div key={opt.id || optIdx} className="col-12 col-md-6">
                             <div
-                              className={`p-2 rounded-3 border small d-flex align-items-center gap-2 ${
+                              className={`p-2 rounded-3 border small d-flex align-items-start gap-2 h-100 ${
                                 isCorrect ? 'bg-success-subtle border-success text-success fw-semibold' : 'bg-light text-secondary'
                               }`}
                             >
                               <span className="font-monospace fw-bold">{String.fromCharCode(65 + optIdx)}.</span>
-                              <span>{opt.text}</span>
-                              {isCorrect && <CheckCircle2 size={14} className="ms-auto" />}
+                              <span className="text-break flex-grow-1">{opt.text}</span>
+                              {isCorrect && <CheckCircle2 size={14} className="flex-shrink-0 mt-1" />}
                             </div>
                           </div>
                         );
@@ -672,21 +722,24 @@ export default function QuestionPaperBuilder() {
                   {/* True / False display */}
                   {q.questionType === 'true_false' && (
                     <div className="mt-2 small text-secondary">
-                      Correct Key: <strong className="text-success">{String(q.correctAnswer).toUpperCase()}</strong>
+                      Correct Key:{' '}
+                      <strong className="text-success">
+                        {q.correctAnswer === undefined || q.correctAnswer === '' ? '—' : String(q.correctAnswer).toUpperCase()}
+                      </strong>
                     </div>
                   )}
 
                   {/* Match pairs display */}
                   {q.questionType === 'match_following' && q.matchPairs && (
                     <div className="mt-2 bg-light p-2 rounded-3 small">
-                      <div className="row fw-semibold text-secondary mb-1">
+                      <div className="row fw-semibold text-secondary mb-1 gx-2">
                         <div className="col-6">Item Column</div>
                         <div className="col-6">Matching Column</div>
                       </div>
                       {q.matchPairs.map((p, pIdx) => (
-                        <div key={pIdx} className="row text-dark py-1 border-bottom border-light">
-                          <div className="col-6">{p.left}</div>
-                          <div className="col-6 text-primary">{p.right}</div>
+                        <div key={p.id || pIdx} className="row gx-2 text-dark py-1 border-bottom border-light">
+                          <div className="col-6 text-break">{p.left}</div>
+                          <div className="col-6 text-primary text-break">{p.right}</div>
                         </div>
                       ))}
                     </div>
@@ -695,7 +748,8 @@ export default function QuestionPaperBuilder() {
                   {/* Numerical display */}
                   {q.questionType === 'numerical' && (
                     <div className="mt-2 small text-secondary">
-                      Target Value: <strong className="text-primary font-monospace">{q.correctAnswer}</strong> (Tolerance: ±{q.numericalTolerance || 0})
+                      Target Value: <strong className="text-primary font-monospace">{q.correctAnswer}</strong>{' '}
+                      (Tolerance: ±{q.numericalTolerance || 0})
                     </div>
                   )}
 
@@ -703,7 +757,7 @@ export default function QuestionPaperBuilder() {
                   {['fill_blanks', 'one_word'].includes(q.questionType) && (
                     <div className="mt-2 small text-secondary">
                       Accepted Answers:{' '}
-                      <strong className="text-success font-monospace">
+                      <strong className="text-success font-monospace text-break">
                         {Array.isArray(q.correctAnswer) ? q.correctAnswer.join(', ') : q.correctAnswer}
                       </strong>
                     </div>
@@ -711,14 +765,14 @@ export default function QuestionPaperBuilder() {
 
                   {/* Descriptive answer rubric */}
                   {['short_answer', 'long_answer', 'case_study'].includes(q.questionType) && q.correctAnswer && (
-                    <div className="mt-2 p-2 rounded-3 bg-light border-start border-3 border-info small">
+                    <div className="mt-2 p-2 rounded-3 bg-light border-start border-3 border-info small text-break">
                       <span className="text-muted fw-semibold">Suggested Answer Key / Scoring Rubric: </span>
-                      <span className="text-dark">{q.correctAnswer}</span>
+                      <span className="text-dark" style={{ whiteSpace: 'pre-wrap' }}>{q.correctAnswer}</span>
                     </div>
                   )}
 
                   {q.explanation && (
-                    <div className="mt-2 text-muted small fst-italic">
+                    <div className="mt-2 text-muted small fst-italic text-break">
                       Explanation: {q.explanation}
                     </div>
                   )}
@@ -743,7 +797,7 @@ export default function QuestionPaperBuilder() {
                 </div>
                 <div className="modal-body p-4">
                   <div className="row g-3">
-                    
+
                     {/* Question Type Selector */}
                     <div className="col-md-6">
                       <label className="form-label small fw-semibold text-secondary">Question Type *</label>
@@ -969,8 +1023,8 @@ export default function QuestionPaperBuilder() {
                       </div>
                     )}
 
-                    {/* DESCRIPTIVE SHORT / LONG RUBRIC */}
-                    {['short_answer', 'long_answer'].includes(questionForm.questionType) && (
+                    {/* DESCRIPTIVE SHORT / LONG / CASE STUDY RUBRIC */}
+                    {['short_answer', 'long_answer', 'case_study'].includes(questionForm.questionType) && (
                       <div className="col-12">
                         <label className="form-label small fw-semibold text-secondary">Teacher Marking Rubric / Key Steps</label>
                         <textarea
@@ -1058,7 +1112,7 @@ export default function QuestionPaperBuilder() {
                                 checked={isSelected}
                                 onChange={() => {}}
                               />
-                              <span className="badge bg-light text-dark border text-uppercase">{bq.questionType?.replace('_', ' ')}</span>
+                              <span className="badge bg-light text-dark border text-uppercase">{formatType(bq.questionType)}</span>
                               <span className="badge bg-secondary-subtle text-secondary">{bq.difficulty}</span>
                               <span className="badge bg-success-subtle text-success">+{bq.marks} M</span>
                               <span className="text-muted small ms-auto">{bq.chapter}</span>
@@ -1472,7 +1526,7 @@ export default function QuestionPaperBuilder() {
                   <button className="btn-close" onClick={() => setShowPreviewModal(false)} />
                 </div>
                 <div className="modal-body p-5 bg-white">
-                  
+
                   {/* Institutional Header */}
                   <div className="text-center border-bottom pb-4 mb-4">
                     <h4 className="fw-bold text-dark text-uppercase mb-1">NEO SCHOOL ACADEMIC BOARD</h4>
