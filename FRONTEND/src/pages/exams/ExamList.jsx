@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Sidebar from "../../components/Sidebar.jsx";
 import examService from "../../services/examService.js";
+import API from "../../api/api.js";
 import {
   FileCheck2,
   PlusCircle,
@@ -654,17 +655,27 @@ export default function ExamList() {
                       {/* Student Actions */}
                       {role === "student" && (
                         <div className="d-grid gap-2">
-<<<<<<< HEAD
-                          {exam.hasExhaustedAttempts || ['submitted', 'auto_submitted', 'evaluation_pending', 'evaluated', 'result_published'].includes(exam.studentAttempt?.status) ? (
+                          {exam.hasExhaustedAttempts ||
+                          [
+                            "submitted",
+                            "auto_submitted",
+                            "evaluation_pending",
+                            "evaluated",
+                            "result_published",
+                          ].includes(exam.studentAttempt?.status) ? (
                             <div className="d-flex align-items-center justify-content-between p-2 rounded-3 bg-light border">
                               <span className="badge bg-secondary-subtle text-secondary px-3 py-2 fw-semibold">
-                                {exam.studentAttempt?.status === 'result_published' || exam.status === 'results_published'
-                                  ? 'Result Published'
-                                  : exam.studentAttempt?.status === 'evaluated'
-                                  ? 'Evaluated'
-                                  : 'Submitted'}
+                                {exam.studentAttempt?.status ===
+                                  "result_published" ||
+                                exam.status === "results_published"
+                                  ? "Result Published"
+                                  : exam.studentAttempt?.status === "evaluated"
+                                  ? "Evaluated"
+                                  : "Submitted"}
                               </span>
-                              {(exam.studentAttempt?.status === 'result_published' || exam.status === 'results_published') ? (
+                              {exam.studentAttempt?.status ===
+                                "result_published" ||
+                              exam.status === "results_published" ? (
                                 <Link
                                   to={`/exams/${exam._id}/results`}
                                   className="btn btn-outline-primary btn-sm fw-semibold d-flex align-items-center gap-1 rounded-3"
@@ -672,28 +683,26 @@ export default function ExamList() {
                                   <Award size={15} /> View Scorecard
                                 </Link>
                               ) : (
-                                <span className="text-muted small">Under Evaluation</span>
+                                <span className="text-muted small">
+                                  Under Evaluation
+                                </span>
                               )}
                             </div>
-                          ) : ['scheduled', 'in_progress', 'live'].includes(exam.status) ? (
-=======
-                          {["scheduled", "in_progress"].includes(
-                            exam.status
-                          ) && (
->>>>>>> 8c195e20eb4fd6e8555cbc7b9f5e3bf2d6847566
+                          ) : ["scheduled", "in_progress", "live"].includes(
+                              exam.status
+                            ) ? (
                             <Link
                               to={`/exams/${exam._id}/take`}
                               className="btn btn-success fw-semibold d-flex align-items-center justify-content-center gap-2 py-2 shadow-sm rounded-3"
                             >
                               <PlayCircle size={18} />
-                              <span>{exam.studentAttempt?.status === 'in_progress' ? 'Resume Exam' : 'Start / Take Exam Now'}</span>
+                              <span>
+                                {exam.studentAttempt?.status === "in_progress"
+                                  ? "Resume Exam"
+                                  : "Start / Take Exam Now"}
+                              </span>
                             </Link>
-<<<<<<< HEAD
-                          ) : exam.status === 'results_published' ? (
-=======
-                          )}
-                          {exam.status === "results_published" && (
->>>>>>> 8c195e20eb4fd6e8555cbc7b9f5e3bf2d6847566
+                          ) : exam.status === "results_published" ? (
                             <Link
                               to={`/exams/${exam._id}/results`}
                               className="btn btn-outline-primary fw-semibold d-flex align-items-center justify-content-center gap-2 py-2 rounded-3"
@@ -701,16 +710,12 @@ export default function ExamList() {
                               <Award size={18} />
                               <span>View Scorecard</span>
                             </Link>
-<<<<<<< HEAD
-                          ) : (
-=======
-                          )}
+                          ) : null}
                           {[
                             "draft",
                             "submitted_for_review",
                             "completed",
                           ].includes(exam.status) && (
->>>>>>> 8c195e20eb4fd6e8555cbc7b9f5e3bf2d6847566
                             <div className="text-center text-muted small py-1">
                               Status:{" "}
                               <strong className="text-capitalize">
