@@ -24,6 +24,7 @@ import StudentResultView from './pages/exams/StudentResultView.jsx';
 import StudentReport from './pages/exams/StudentReport.jsx';
 import ExamPatterns from './pages/exams/ExamPatterns.jsx';
 import NotificationPage from './pages/notifications/NotificationPage.jsx';
+import LeaveManagement from './pages/leaves/LeaveManagement.jsx';
 
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 
@@ -40,6 +41,14 @@ export default function App() {
           element={
             <ProtectedRoute>
               <Dashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/leaves"
+          element={
+            <ProtectedRoute>
+              <LeaveManagement />
             </ProtectedRoute>
           }
         />

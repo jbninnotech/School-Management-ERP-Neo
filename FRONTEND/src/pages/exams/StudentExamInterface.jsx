@@ -130,6 +130,11 @@ export default function StudentExamInterface() {
 
     } catch (err) {
       console.error('Failed to initialize or resume exam attempt:', err);
+      if (err.response?.status === 409) {
+        // Attempt already submitted - redirect to results / submission summary
+        navigate(`/exams/${id}/results`, { replace: true });
+        return;
+      }
       const errMsg = err.response?.data?.message || err.message || 'Error starting exam';
       setInitError(errMsg);
     } finally {
@@ -500,17 +505,37 @@ export default function StudentExamInterface() {
         attemptId: attempt._id,
         submissionType: isTimeout ? 'auto_timeout' : 'manual',
       });
-      if (res.data?.success) {
-        // Clear local backup once server confirms persistence
+      // Clear any and all saved local attempt data on submit
+      try {
         localStorage.removeItem(`backup_attempt_${attempt._id}`);
+        Object.keys(localStorage).forEach((key) => {
+          if (key.includes(attempt._id) || key.includes(id)) {
+            localStorage.removeItem(key);
+          }
+        });
+      } catch (_) {}
+
+      if (res.data?.success) {
         window.alert(
           isTimeout
             ? 'Exam duration has ended. Your responses were automatically submitted.'
             : 'Examination submitted successfully!'
         );
-        navigate(`/exams/${id}/results`);
+        navigate(`/exams/${id}/results`, { replace: true });
       }
     } catch (err) {
+      if (err.response?.status === 409) {
+        try {
+          localStorage.removeItem(`backup_attempt_${attempt._id}`);
+          Object.keys(localStorage).forEach((key) => {
+            if (key.includes(attempt._id) || key.includes(id)) {
+              localStorage.removeItem(key);
+            }
+          });
+        } catch (_) {}
+        navigate(`/exams/${id}/results`, { replace: true });
+        return;
+      }
       setHasNetworkSubmitError(true);
       window.alert(
         err.response?.data?.message ||

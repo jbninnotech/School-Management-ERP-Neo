@@ -1,6 +1,6 @@
 import Examination from '../models/examinationModel.js';
 import { notifyStudentsExamGoLive } from './notificationService.js';
-import { emitExamMonitorUpdate } from '../server.js';
+import { emitExamMonitorUpdate } from '../socket.js';
 import ExaminationAuditLog from '../models/examinationAuditLogModel.js';
 
 /**

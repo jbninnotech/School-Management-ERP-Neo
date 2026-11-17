@@ -14,7 +14,7 @@ import {
   notifyStudentsExamEnded,
 } from '../services/notificationService.js';
 import { getLiveExamMonitorData } from '../services/liveMonitorService.js';
-import { emitExamMonitorUpdate } from '../server.js';
+import { emitExamMonitorUpdate } from '../socket.js';
 
 // Helper: Log audit event
 const logAuditEvent = async (examId, userId, userRole, action, details = {}, ip = '') => {
@@ -344,6 +344,19 @@ export const getExams = async (req, res, next) => {
 
     let sanitizedExams = exams;
     if (req.user.role === 'student') {
+      const examIds = exams.map((e) => e._id);
+      const studentAttempts = await ExaminationAttempt.find({
+        student: req.user._id,
+        examination: { $in: examIds },
+      }).select('examination status attemptNumber score submittedAt isResultPublished').lean();
+
+      const attemptsMap = {};
+      studentAttempts.forEach((att) => {
+        const eid = att.examination.toString();
+        if (!attemptsMap[eid]) attemptsMap[eid] = [];
+        attemptsMap[eid].push(att);
+      });
+
       sanitizedExams = exams.map((ex) => {
         const obj = ex.toObject();
         if (obj.examSections) {
@@ -356,6 +369,17 @@ export const getExams = async (req, res, next) => {
             }
           });
         }
+        const userAttempts = attemptsMap[ex._id.toString()] || [];
+        const latestAttempt = userAttempts.sort((a, b) => (b.attemptNumber || 1) - (a.attemptNumber || 1))[0] || null;
+        const completedAttempts = userAttempts.filter((att) =>
+          ['submitted', 'auto_submitted', 'evaluation_pending', 'evaluated', 'result_published'].includes(att.status)
+        );
+        const maxAttempts = ex.maxAttempts || 1;
+        const hasExhaustedAttempts = !ex.isPracticeMode && completedAttempts.length >= maxAttempts;
+
+        obj.studentAttempt = latestAttempt;
+        obj.completedAttemptsCount = completedAttempts.length;
+        obj.hasExhaustedAttempts = hasExhaustedAttempts;
         return obj;
       });
     }
@@ -1160,9 +1184,10 @@ export const startExamAttempt = async (req, res, next) => {
         activeAttempt.submissionType = 'auto_timeout';
         await activeAttempt.save();
 
-        return res.status(400).json({
+        return res.status(409).json({
           success: false,
-          message: 'The examination time limit has expired while away.',
+          message: 'You have already submitted this exam',
+          status: 'auto_submitted',
         });
       }
 
@@ -1195,9 +1220,9 @@ export const startExamAttempt = async (req, res, next) => {
     );
 
     if (!exam.isPracticeMode && completedAttempts.length >= (exam.maxAttempts || 1)) {
-      return res.status(403).json({
+      return res.status(409).json({
         success: false,
-        message: `You have exhausted the maximum allowed attempts (${exam.maxAttempts || 1}) for this examination`,
+        message: 'You have already submitted this exam',
       });
     }
 
@@ -1229,22 +1254,33 @@ export const startExamAttempt = async (req, res, next) => {
       });
     });
 
-    const newAttempt = await ExaminationAttempt.create({
-      student: req.user._id,
-      examination: exam._id,
-      attemptNumber: completedAttempts.length + 1,
-      examVersion: exam.version || 1,
-      startedAt: serverNow,
-      deadline,
-      status: 'in_progress',
-      answers: initialAnswers,
-      score: {
-        maxMarks: exam.totalMarks,
-        totalScore: 0,
-        percentage: 0,
-        isPassed: false,
-      },
-    });
+    let newAttempt;
+    try {
+      newAttempt = await ExaminationAttempt.create({
+        student: req.user._id,
+        examination: exam._id,
+        attemptNumber: completedAttempts.length + 1,
+        examVersion: exam.version || 1,
+        startedAt: serverNow,
+        deadline,
+        status: 'in_progress',
+        answers: initialAnswers,
+        score: {
+          maxMarks: exam.totalMarks,
+          totalScore: 0,
+          percentage: 0,
+          isPassed: false,
+        },
+      });
+    } catch (createErr) {
+      if (createErr.code === 11000) {
+        return res.status(409).json({
+          success: false,
+          message: 'You have already submitted this exam',
+        });
+      }
+      throw createErr;
+    }
 
     if (!exam.isSnapshotLocked) {
       exam.isSnapshotLocked = true;
@@ -1299,9 +1335,10 @@ export const saveStudentAnswer = async (req, res, next) => {
     }
 
     if (attempt.status !== 'in_progress') {
-      return res.status(400).json({
+      const isFinished = ['submitted', 'auto_submitted', 'evaluation_pending', 'evaluated', 'result_published'].includes(attempt.status);
+      return res.status(isFinished ? 409 : 400).json({
         success: false,
-        message: 'Cannot save response: this examination attempt is no longer in progress',
+        message: isFinished ? 'You have already submitted this exam' : 'Cannot save response: this examination attempt is no longer in progress',
       });
     }
 
@@ -1372,9 +1409,10 @@ export const saveAttemptAnswerDirect = async (req, res, next) => {
     }
 
     if (attempt.status !== 'in_progress') {
-      return res.status(400).json({
+      const isFinished = ['submitted', 'auto_submitted', 'evaluation_pending', 'evaluated', 'result_published'].includes(attempt.status);
+      return res.status(isFinished ? 409 : 400).json({
         success: false,
-        message: 'Cannot save response: this examination attempt is no longer in progress',
+        message: isFinished ? 'You have already submitted this exam' : 'Cannot save response: this examination attempt is no longer in progress',
       });
     }
 
@@ -1442,6 +1480,14 @@ export const attemptHeartbeat = async (req, res, next) => {
     const serverNow = new Date();
 
     if (attempt.status !== 'in_progress') {
+      const isFinished = ['submitted', 'auto_submitted', 'evaluation_pending', 'evaluated', 'result_published'].includes(attempt.status);
+      if (isFinished) {
+        return res.status(409).json({
+          success: false,
+          status: attempt.status,
+          message: 'You have already submitted this exam',
+        });
+      }
       return res.status(200).json({
         success: false,
         status: attempt.status,
@@ -1516,6 +1562,17 @@ export const recordTabSwitch = async (req, res, next) => {
     const { attemptId, reason } = req.body;
     const attempt = await ExaminationAttempt.findById(attemptId);
 
+    if (attempt && attempt.status !== 'in_progress') {
+      const isFinished = ['submitted', 'auto_submitted', 'evaluation_pending', 'evaluated', 'result_published'].includes(attempt.status);
+      if (isFinished) {
+        return res.status(409).json({
+          success: false,
+          status: attempt.status,
+          message: 'You have already submitted this exam',
+        });
+      }
+    }
+
     if (attempt && attempt.status === 'in_progress') {
       attempt.tabSwitchesCount = (attempt.tabSwitchesCount || 0) + 1;
       if (!Array.isArray(attempt.tabSwitchLogs)) {
@@ -1561,6 +1618,14 @@ export const logAttemptViolation = async (req, res, next) => {
     }
 
     if (attempt.status !== 'in_progress') {
+      const isFinished = ['submitted', 'auto_submitted', 'evaluation_pending', 'evaluated', 'result_published'].includes(attempt.status);
+      if (isFinished) {
+        return res.status(409).json({
+          success: false,
+          status: attempt.status,
+          message: 'You have already submitted this exam',
+        });
+      }
       return res.status(200).json({
         success: false,
         message: 'Attempt is no longer in progress',
@@ -1737,12 +1802,12 @@ export const submitExamAttempt = async (req, res, next) => {
       return res.status(404).json({ success: false, message: 'Associated examination record not found' });
     }
 
-    // IDEMPOTENCY: If already submitted, return existing state with success=true
+    // If already submitted, return 409 status as required by Issue 9
     if (['submitted', 'auto_submitted', 'evaluation_pending', 'evaluated', 'result_published'].includes(attempt.status)) {
-      return res.status(200).json({
-        success: true,
+      return res.status(409).json({
+        success: false,
         isAlreadySubmitted: true,
-        message: 'Examination attempt is already submitted.',
+        message: 'You have already submitted this exam',
         data: {
           attemptId: attempt._id,
           status: attempt.status,
@@ -1802,7 +1867,7 @@ export const submitExamAttempt = async (req, res, next) => {
     attempt.score.totalScore = Math.max(0, autoScore);
     attempt.score.maxMarks = exam.totalMarks;
     attempt.score.percentage = exam.totalMarks > 0 ? (attempt.score.totalScore / exam.totalMarks) * 100 : 0;
-    attempt.score.isPassed = attempt.score.totalScore >= exam.passingMarks;
+    attempt.score.isPassed = attempt.score.totalScore >= (exam.passingMarks || 0);
     attempt.score.sectionWiseScores = Object.values(sectionScores);
 
     // Default: submitted state awaiting teacher review/approval
@@ -1984,7 +2049,7 @@ export const saveManualEvaluation = async (req, res, next) => {
     attempt.score.manualScore = manualScore;
     attempt.score.totalScore = (attempt.score.autoScore || 0) + manualScore;
     attempt.score.percentage = exam.totalMarks > 0 ? (attempt.score.totalScore / exam.totalMarks) * 100 : 0;
-    attempt.score.isPassed = attempt.score.totalScore >= exam.passingMarks;
+    attempt.score.isPassed = attempt.score.totalScore >= (exam.passingMarks || 0);
 
     attempt.evaluatedBy = req.user._id;
     attempt.evaluatedAt = new Date();

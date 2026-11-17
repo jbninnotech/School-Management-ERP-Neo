@@ -13,6 +13,9 @@ import questionPaperRoutes from './routes/questionPaperRoutes.js';
 import uploadRoutes from './routes/uploadRoutes.js';
 import examPatternRoutes from './routes/examPatternRoutes.js';
 import categoryRoutes from './routes/categoryRoutes.js';
+import leaveRoutes from './routes/leaveRoutes.js';
+import timetableRoutes from './routes/timetableRoutes.js';
+import substitutionRoutes from './routes/substitutionRoutes.js';
 
 const app = express();
 
@@ -109,6 +112,15 @@ app.use('/api/v1/exam-patterns', examPatternRoutes);
 
 app.use('/api/categories', categoryRoutes);
 app.use('/api/v1/categories', categoryRoutes);
+
+app.use('/api/leaves', leaveRoutes);
+app.use('/api/v1/leaves', leaveRoutes);
+
+app.use('/api/timetable', timetableRoutes);
+app.use('/api/v1/timetable', timetableRoutes);
+
+app.use('/api/substitutions', substitutionRoutes);
+app.use('/api/v1/substitutions', substitutionRoutes);
 
 // ─── 404 HANDLER ───────────────────────────────────────────────────────────
 app.use((req, res, next) => {

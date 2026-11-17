@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../../components/Sidebar.jsx';
 import TimePicker from '../../components/TimePicker.jsx';
@@ -16,8 +16,35 @@ import {
   HelpCircle,
   Calendar,
   Sparkles,
-  Info
+  Info,
+  Search,
+  ChevronDown,
+  Check,
+  X,
+  BookOpen,
+  Plus
 } from 'lucide-react';
+
+// Preset standard school subjects list
+const PREDEFINED_SUBJECTS = [
+  'English',
+  'Telugu',
+  'Hindi',
+  'Mathematics',
+  'Environmental Studies (EVS)',
+  'General Science',
+  'Social Studies',
+  'Computer Science',
+  'General Knowledge',
+  'Drawing / Art & Craft',
+  'Physical Education',
+  'Physics',
+  'Chemistry',
+  'Biology',
+  'Economics',
+  'Accountancy',
+  'Business Studies'
+];
 
 export default function CreateExamWizard() {
   const navigate = useNavigate();
@@ -31,6 +58,11 @@ export default function CreateExamWizard() {
   const [availablePapers, setAvailablePapers] = useState([]);
   const [selectedPaperId, setSelectedPaperId] = useState('');
 
+  // Searchable Subject Dropdown State
+  const [isSubjectDropdownOpen, setIsSubjectDropdownOpen] = useState(false);
+  const [subjectSearchQuery, setSubjectSearchQuery] = useState('');
+  const subjectDropdownRef = useRef(null);
+
   // Form State
   const [formData, setFormData] = useState({
     // Step 1: Basic Info
@@ -39,7 +71,7 @@ export default function CreateExamWizard() {
     academicYear: '2025-2026',
     classGrade: 'Class 10',
     sections: ['A'],
-    subject: 'Mathematics Standard',
+    subject: 'Mathematics',
     description: '',
     instructions: '1. All questions are mandatory.\n2. Do not navigate away from the test tab.\n3. Verify your responses before clicking Submit.',
 
@@ -84,6 +116,17 @@ export default function CreateExamWizard() {
     { num: 4, label: 'Security & Rules', icon: <Shield size={18} /> },
   ];
 
+  // Close subject dropdown when clicked outside
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (subjectDropdownRef.current && !subjectDropdownRef.current.contains(event.target)) {
+        setIsSubjectDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   // Fetch teacher's question papers matching selected class & subject
   useEffect(() => {
     let isMounted = true;
@@ -116,6 +159,23 @@ export default function CreateExamWizard() {
       return { ...prev, sections: updated.length ? updated : ['A'] };
     });
   };
+
+  const handleSelectSubject = (subj) => {
+    setFormData((prev) => ({ ...prev, subject: subj }));
+    setIsSubjectDropdownOpen(false);
+    setSubjectSearchQuery('');
+  };
+
+  // Filtered subjects based on query
+  const filteredSubjects = PREDEFINED_SUBJECTS.filter((s) =>
+    s.toLowerCase().includes(subjectSearchQuery.trim().toLowerCase())
+  );
+
+  const isCustomSubject =
+    subjectSearchQuery.trim() !== '' &&
+    !PREDEFINED_SUBJECTS.some(
+      (s) => s.toLowerCase() === subjectSearchQuery.trim().toLowerCase()
+    );
 
   const validateStep = () => {
     setErrorMsg('');
@@ -183,7 +243,6 @@ export default function CreateExamWizard() {
     try {
       const startDateTime = parseTime12h(formData.startTime, formData.examDate);
       let endDateTime = parseTime12h(formData.endTime, formData.examDate);
-      // Midnight crossing adjustment
       if (endDateTime && startDateTime && endDateTime <= startDateTime) {
         endDateTime = new Date(endDateTime.getTime() + 24 * 60 * 60 * 1000);
       }
@@ -198,7 +257,6 @@ export default function CreateExamWizard() {
         maxFacePauseMinutes: Number(formData.maxFacePauseMinutes) || 5,
         totalMarks: Number(formData.totalMarks),
         passingMarks: Number(formData.passingMarks),
-        durationMinutes: Number(formData.durationMinutes),
         defaultNegativeMarks: Number(formData.defaultNegativeMarks),
         tabSwitchLimit: Number(formData.tabSwitchLimit),
         maxAttempts: Number(formData.maxAttempts),
@@ -218,7 +276,6 @@ export default function CreateExamWizard() {
 
   return (
     <div style={{ backgroundColor: '#f8fafc', minHeight: '100vh', width: '100%' }}>
-      {/* Responsive Inline CSS */}
       <style>{`
         .wizard-container {
           margin-left: 260px;
@@ -246,6 +303,47 @@ export default function CreateExamWizard() {
         .interactive-label {
           cursor: pointer;
           user-select: none;
+        }
+        /* Searchable Dropdown Style */
+        .subject-dropdown-menu {
+          position: absolute;
+          top: calc(100% + 6px);
+          left: 0;
+          right: 0;
+          background: #ffffff;
+          border: 1px solid #cbd5e1;
+          border-radius: 12px;
+          box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.1), 0 8px 10px -6px rgba(15, 23, 42, 0.05);
+          z-index: 1050;
+          overflow: hidden;
+          animation: dropFadeIn 0.18s ease-out;
+        }
+        @keyframes dropFadeIn {
+          from { opacity: 0; transform: translateY(-4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .subject-item-btn {
+          width: 100%;
+          text-align: left;
+          background: transparent;
+          border: none;
+          padding: 8px 14px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          font-size: 0.88rem;
+          color: #334155;
+          border-radius: 8px;
+          transition: background-color 0.12s ease;
+        }
+        .subject-item-btn:hover {
+          background-color: #f1f5f9;
+          color: #1e293b;
+        }
+        .subject-item-btn.selected {
+          background-color: #eff6ff;
+          color: #2563eb;
+          font-weight: 600;
         }
       `}</style>
 
@@ -431,17 +529,112 @@ export default function CreateExamWizard() {
                   </select>
                 </div>
 
-                <div className="col-12 col-md-4">
-                  <label className="form-label small fw-semibold text-secondary">Subject *</label>
-                  <input
-                    type="text"
-                    name="subject"
-                    className="form-control py-2"
-                    placeholder="e.g. Mathematics Standard"
-                    value={formData.subject}
-                    onChange={handleTextChange}
-                    required
-                  />
+                {/* ================= SEARCHABLE SUBJECT DROPDOWN ================= */}
+                <div className="col-12 col-md-4 position-relative" ref={subjectDropdownRef}>
+                  <label className="form-label small fw-semibold text-secondary d-flex align-items-center justify-content-between mb-1">
+                    <span>Subject <span className="text-danger">*</span></span>
+                    <span className="text-muted fw-normal" style={{ fontSize: '0.74rem' }}>
+                      Search or Pick
+                    </span>
+                  </label>
+                  
+                  {/* Dropdown Trigger Box */}
+                  <div
+                    onClick={() => setIsSubjectDropdownOpen(!isSubjectDropdownOpen)}
+                    className="form-control d-flex align-items-center justify-content-between py-2 px-3"
+                    style={{
+                      cursor: 'pointer',
+                      borderColor: isSubjectDropdownOpen ? '#2563eb' : '#cbd5e1',
+                      boxShadow: isSubjectDropdownOpen ? '0 0 0 3px rgba(37,99,235,0.1)' : 'none',
+                      backgroundColor: '#ffffff'
+                    }}
+                  >
+                    <div className="d-flex align-items-center gap-2 overflow-hidden text-truncate">
+                      <BookOpen size={16} className="text-primary flex-shrink-0" />
+                      <span className={formData.subject ? 'fw-medium text-dark text-truncate' : 'text-muted'}>
+                        {formData.subject || 'Select or type subject...'}
+                      </span>
+                    </div>
+                    <ChevronDown
+                      size={17}
+                      className="text-secondary flex-shrink-0 ms-2"
+                      style={{
+                        transform: isSubjectDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                        transition: 'transform 0.18s ease'
+                      }}
+                    />
+                  </div>
+
+                  {/* Dropdown Menu Popup */}
+                  {isSubjectDropdownOpen && (
+                    <div className="subject-dropdown-menu p-2">
+                      {/* Search Input Box */}
+                      <div className="position-relative mb-2">
+                        <Search
+                          size={15}
+                          className="position-absolute text-muted"
+                          style={{ left: '10px', top: '50%', transform: 'translateY(-50%)' }}
+                        />
+                        <input
+                          type="text"
+                          className="form-control form-control-sm ps-4 pe-4 bg-light border-0"
+                          placeholder="Search subjects (e.g., Mathematics, EVS)..."
+                          value={subjectSearchQuery}
+                          onChange={(e) => setSubjectSearchQuery(e.target.value)}
+                          autoFocus
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        {subjectSearchQuery && (
+                          <button
+                            type="button"
+                            className="btn btn-link btn-sm p-0 position-absolute text-secondary"
+                            style={{ right: '8px', top: '50%', transform: 'translateY(-50%)' }}
+                            onClick={() => setSubjectSearchQuery('')}
+                          >
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Subjects List */}
+                      <div style={{ maxHeight: '220px', overflowY: 'auto' }} className="d-flex flex-column gap-1 pe-1">
+                        {filteredSubjects.map((subj) => {
+                          const isSelected = formData.subject === subj;
+                          return (
+                            <button
+                              key={subj}
+                              type="button"
+                              className={`subject-item-btn ${isSelected ? 'selected' : ''}`}
+                              onClick={() => handleSelectSubject(subj)}
+                            >
+                              <span>{subj}</span>
+                              {isSelected && <Check size={16} className="text-primary" />}
+                            </button>
+                          );
+                        })}
+
+                        {/* Custom Subject creation option if query doesn't match predefined subjects */}
+                        {isCustomSubject && (
+                          <button
+                            type="button"
+                            className="subject-item-btn text-primary border-top pt-2 mt-1"
+                            onClick={() => handleSelectSubject(subjectSearchQuery.trim())}
+                          >
+                            <span className="d-flex align-items-center gap-1 text-truncate">
+                              <Plus size={15} /> Use custom: "<strong>{subjectSearchQuery.trim()}</strong>"
+                            </span>
+                            <span className="badge bg-primary-subtle text-primary small">Custom</span>
+                          </button>
+                        )}
+
+                        {filteredSubjects.length === 0 && !isCustomSubject && (
+                          <div className="text-center py-3 text-muted small">
+                            No subjects found.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="col-12 col-md-4">
@@ -637,7 +830,6 @@ export default function CreateExamWizard() {
                   </span>
                 </div>
 
-                {/* Face Auto-Pause Proctoring Setting */}
                 <div className="col-12 col-md-6">
                   <label className="form-label small fw-semibold text-secondary">On Face Pause (Proctoring Timer)</label>
                   <select
@@ -764,7 +956,6 @@ export default function CreateExamWizard() {
                   </select>
                 </div>
 
-                {/* Negative Marking Card */}
                 <div className="col-12 col-md-6">
                   <div className="form-check-card h-100">
                     <div className="form-check form-switch mb-2">
@@ -802,7 +993,6 @@ export default function CreateExamWizard() {
                   </div>
                 </div>
 
-                {/* Partial Marking Card */}
                 <div className="col-12 col-md-6">
                   <div className="form-check-card h-100">
                     <div className="form-check form-switch mb-2">
@@ -866,7 +1056,6 @@ export default function CreateExamWizard() {
                   />
                 </div>
 
-                {/* Anti-Cheating & Randomization Toggles */}
                 <div className="col-12 col-md-6">
                   <div className="form-check-card h-100">
                     <div className="form-check form-switch">

@@ -461,16 +461,35 @@ export default function ExamList() {
                       {/* Student Actions */}
                       {role === 'student' && (
                         <div className="d-grid gap-2">
-                          {['scheduled', 'in_progress'].includes(exam.status) && (
+                          {exam.hasExhaustedAttempts || ['submitted', 'auto_submitted', 'evaluation_pending', 'evaluated', 'result_published'].includes(exam.studentAttempt?.status) ? (
+                            <div className="d-flex align-items-center justify-content-between p-2 rounded-3 bg-light border">
+                              <span className="badge bg-secondary-subtle text-secondary px-3 py-2 fw-semibold">
+                                {exam.studentAttempt?.status === 'result_published' || exam.status === 'results_published'
+                                  ? 'Result Published'
+                                  : exam.studentAttempt?.status === 'evaluated'
+                                  ? 'Evaluated'
+                                  : 'Submitted'}
+                              </span>
+                              {(exam.studentAttempt?.status === 'result_published' || exam.status === 'results_published') ? (
+                                <Link
+                                  to={`/exams/${exam._id}/results`}
+                                  className="btn btn-outline-primary btn-sm fw-semibold d-flex align-items-center gap-1 rounded-3"
+                                >
+                                  <Award size={15} /> View Scorecard
+                                </Link>
+                              ) : (
+                                <span className="text-muted small">Under Evaluation</span>
+                              )}
+                            </div>
+                          ) : ['scheduled', 'in_progress', 'live'].includes(exam.status) ? (
                             <Link
                               to={`/exams/${exam._id}/take`}
                               className="btn btn-success fw-semibold d-flex align-items-center justify-content-center gap-2 py-2 shadow-sm rounded-3"
                             >
                               <PlayCircle size={18} />
-                              <span>Start / Take Exam Now</span>
+                              <span>{exam.studentAttempt?.status === 'in_progress' ? 'Resume Exam' : 'Start / Take Exam Now'}</span>
                             </Link>
-                          )}
-                          {exam.status === 'results_published' && (
+                          ) : exam.status === 'results_published' ? (
                             <Link
                               to={`/exams/${exam._id}/results`}
                               className="btn btn-outline-primary fw-semibold d-flex align-items-center justify-content-center gap-2 py-2 rounded-3"
@@ -478,8 +497,7 @@ export default function ExamList() {
                               <Award size={18} />
                               <span>View Scorecard</span>
                             </Link>
-                          )}
-                          {['draft', 'submitted_for_review', 'completed'].includes(exam.status) && (
+                          ) : (
                             <div className="text-center text-muted small py-1">
                               Status: <strong className="text-capitalize">{exam.status.replace(/_/g, ' ')}</strong>
                             </div>

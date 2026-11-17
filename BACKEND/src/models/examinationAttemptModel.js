@@ -188,7 +188,7 @@ const examinationAttemptSchema = new mongoose.Schema(
 );
 
 // Compound index to ensure uniqueness per student & attempt
-examinationAttemptSchema.index({ student: 1, examination: 1, attemptNumber: 1 });
+examinationAttemptSchema.index({ student: 1, examination: 1, attemptNumber: 1 }, { unique: true });
 
 const ExaminationAttempt = mongoose.model('ExaminationAttempt', examinationAttemptSchema);
 export default ExaminationAttempt;

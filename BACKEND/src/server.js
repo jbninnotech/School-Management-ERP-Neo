@@ -29,6 +29,7 @@ export const io = new SocketIO(httpServer, {
     credentials: true,
   },
 });
+setIo(io);
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
@@ -57,15 +58,8 @@ io.on('connection', (socket) => {
   });
 });
 
-// Helper: emit notification to a specific user
-export const emitNotificationToUser = (userId, notification) => {
-  io.to(`user_${userId}`).emit('new_notification', notification);
-};
-
-// Helper: emit exam monitor update to watchers
-export const emitExamMonitorUpdate = (examId, data) => {
-  io.to(`exam_monitor_${examId}`).emit('exam_monitor_update', data);
-};
+import { setIo, emitNotificationToUser, emitExamMonitorUpdate } from './socket.js';
+export { emitNotificationToUser, emitExamMonitorUpdate };
 
 // Connect to Database and start server
 const startServer = async () => {

@@ -1,6 +1,6 @@
 import Notification from '../models/notificationModel.js';
 import User from '../models/userModel.js';
-import { emitNotificationToUser } from '../server.js';
+import { emitNotificationToUser } from '../socket.js';
 
 /**
  * Universal Centralized createNotification Helper

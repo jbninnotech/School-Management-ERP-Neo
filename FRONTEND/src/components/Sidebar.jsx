@@ -16,7 +16,8 @@ import {
   BarChart3,
   Award,
   Bell,
-  Layers
+  Layers,
+  CalendarCheck2
 } from 'lucide-react';
 
 export default function Sidebar({ user }) {
@@ -363,6 +364,16 @@ export default function Sidebar({ user }) {
           >
             <Calendar className="me-2 text-primary-subtle flex-shrink-0" size={16} />
             <span className="text-truncate">Dashboard</span>
+          </Link>
+
+          <Link
+            to="/leaves"
+            className="sidebar-item-link"
+            style={styles.navLink(isCurrentPath('/leaves'))}
+            onClick={() => setIsMobileOpen(false)}
+          >
+            <CalendarCheck2 className="me-2 text-emerald-400 flex-shrink-0" size={16} />
+            <span className="text-truncate">Leave Management</span>
           </Link>
 
           <Link
