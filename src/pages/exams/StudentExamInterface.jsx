@@ -1,0 +1,1660 @@
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import API from "../../api/api.js";
+import CameraProctor from "../../components/CameraProctor.jsx";
+import ExamVideoRecorder from "../../components/ExamVideoRecorder.jsx";
+import ExamErrorBoundary from "../../components/ExamErrorBoundary.jsx";
+import SafeCalculator from "../../components/SafeCalculator.jsx";
+import RoughWorkPanel from "../../components/RoughWorkPanel.jsx";
+import {
+  Clock,
+  CheckCircle2,
+  AlertTriangle,
+  Bookmark,
+  ChevronLeft,
+  ChevronRight,
+  Send,
+  RotateCcw,
+  Maximize,
+  Minimize,
+  Eye,
+  ShieldAlert,
+  HelpCircle,
+  Calculator,
+  Camera,
+  Radio,
+  Edit3,
+} from "lucide-react";
+
+export default function StudentExamInterface() {
+  const { id } = useParams(); // examId
+  const navigate = useNavigate();
+  const currentUser = JSON.parse(sessionStorage.getItem("user") || "{}");
+
+  const [exam, setExam] = useState(null);
+  const [attempt, setAttempt] = useState(null);
+  const [questions, setQuestions] = useState([]);
+  const [currentQIndex, setCurrentQIndex] = useState(0);
+
+  // Student Responses dictionary: { [questionId]: { studentAnswer, isMarkedForReview, visited, isAnswered } }
+  const [responses, setResponses] = useState({});
+  const [secondsRemaining, setSecondsRemaining] = useState(3600);
+  const [loading, setLoading] = useState(true);
+  const [savingStatus, setSavingStatus] = useState("saved"); // 'saving' | 'saved' | 'error'
+
+  // Modals & Tools
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const [showTabWarning, setShowTabWarning] = useState(false);
+  const [tabSwitchCount, setTabSwitchCount] = useState(0);
+  const [showCalculator, setShowCalculator] = useState(false);
+  const [showRoughWork, setShowRoughWork] = useState(false);
+  const [calcInput, setCalcInput] = useState("");
+  const [calcResult, setCalcResult] = useState("");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Face auto-pause state
+  const [isFacePaused, setIsFacePaused] = useState(false);
+  const [facePauseDurationSec, setFacePauseDurationSec] = useState(0);
+  const facePauseIntervalRef = useRef(null);
+
+  // References
+  const timerRef = useRef(null); // <-- FIXED: Added missing timerRef
+  const heartbeatIntervalRef = useRef(null);
+  const lastViolationTimeRef = useRef(0);
+  const seqRef = useRef(1);
+  const [activeMediaStream, setActiveMediaStream] = useState(null);
+
+  const [permissionGranted, setPermissionGranted] = useState(false);
+  const [permissionError, setPermissionError] = useState("");
+  const [askingPermissions, setAskingPermissions] = useState(false);
+  const [userLocation, setUserLocation] = useState(null);
+  const [violationMessage, setViolationMessage] = useState("");
+  const [maxWarnings, setMaxWarnings] = useState(3);
+  const [hasNetworkSubmitError, setHasNetworkSubmitError] = useState(false);
+  const [initError, setInitError] = useState("");
+  const [resumedNotice, setResumedNotice] = useState(false);
+
+  const activeStreamRef = useRef(null);
+
+  const handleCameraStatus = useCallback((status, stream) => {
+    if (stream) {
+      activeStreamRef.current = stream;
+      setActiveMediaStream((prev) => (prev === stream ? prev : stream));
+    }
+  }, []);
+
+  const stopAllCamera = useCallback(() => {
+    activeStreamRef.current?.getTracks().forEach((t) => t.stop());
+    activeStreamRef.current = null;
+    setActiveMediaStream(null);
+  }, []);
+
+  useEffect(() => () => stopAllCamera(), [stopAllCamera]);
+
+  // 1. Initialize or Resume Examination Attempt
+  const initExam = async () => {
+    setLoading(true);
+    setInitError("");
+    try {
+      const res = await API.post(`/exams/${id}/start-attempt`, {
+        location: userLocation || undefined,
+      });
+
+      const { attempt: att, exam: ex, timeRemainingSeconds } =
+        res.data?.data || {};
+
+      if (!ex || !att) {
+        throw new Error("Received incomplete examination data from server.");
+      }
+
+      setExam(ex);
+      setAttempt(att);
+      setSecondsRemaining(
+        typeof timeRemainingSeconds === "number" ? timeRemainingSeconds : 3600
+      );
+
+      if (res.data?.message?.toLowerCase().includes("resum")) {
+        setResumedNotice(true);
+      }
+
+      // Flatten all questions across sections safely
+      const allQs = [];
+      (ex.examSections || []).forEach((sec, sIdx) => {
+        (sec.questions || []).forEach((q, qIdx) => {
+          allQs.push({
+            ...q,
+            questionId: q.questionId || q._id || `q_${sIdx}_${qIdx}`,
+            sectionId: sec.id || `sec_${sIdx + 1}`,
+            sectionTitle: sec.title || `Section ${sIdx + 1}`,
+          });
+        });
+      });
+
+      if (ex.randomizeQuestionOrder) {
+        allQs.sort(() => Math.random() - 0.5);
+      }
+      setQuestions(allQs);
+
+      // Populate responses map from attempt answers safely
+      const respMap = {};
+      allQs.forEach((q, idx) => {
+        const qId = q.questionId
+          ? q.questionId.toString()
+          : q._id
+          ? q._id.toString()
+          : `q_${idx}`;
+        const existingAns = att.answers?.find(
+          (a) => a?.questionId?.toString() === qId
+        );
+
+        respMap[qId] = {
+          studentAnswer: existingAns?.studentAnswer ?? null,
+          isAnswered: Boolean(existingAns?.isAnswered),
+          isMarkedForReview: Boolean(existingAns?.isMarkedForReview),
+          visited: idx === 0 ? true : Boolean(existingAns?.visited),
+        };
+      });
+      setResponses(respMap);
+    } catch (err) {
+      console.error("Failed to initialize or resume exam attempt:", err);
+      if (err.response?.status === 409) {
+        // Attempt already submitted - redirect to results / submission summary
+        navigate(`/exams/${id}/results`, { replace: true });
+        return;
+      }
+      const errMsg =
+        err.response?.data?.message || err.message || "Error starting exam";
+      setInitError(errMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Check already granted permissions on load to skip device screen if already active
+  useEffect(() => {
+    const checkExistingPermissions = async () => {
+      try {
+        if (navigator.permissions && navigator.permissions.query) {
+          const camPerm = await navigator.permissions
+            .query({ name: "camera" })
+            .catch(() => null);
+          const geoPerm = await navigator.permissions
+            .query({ name: "geolocation" })
+            .catch(() => null);
+
+          if (camPerm?.state === "granted" && geoPerm?.state === "granted") {
+            setPermissionGranted(true);
+          }
+        }
+      } catch (_) {}
+    };
+
+    checkExistingPermissions();
+    initExam();
+  }, [id]);
+
+  // Authoritative Timer Loop (respects face pause if timer is frozen)
+  useEffect(() => {
+    if (loading || !attempt) return;
+
+    timerRef.current = setInterval(() => {
+      // If exam has freeze_timer rule and face is currently paused, pause client timer display
+      if (exam?.facePauseRule === "freeze_timer" && isFacePaused) {
+        return;
+      }
+
+      setSecondsRemaining((prev) => {
+        if (prev <= 1) {
+          clearInterval(timerRef.current);
+          handleAutoSubmit();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [loading, attempt, exam?.facePauseRule, isFacePaused]);
+
+  // Request Mandatory Camera and Geolocation Access (Phase 6)
+  const requestMediaAndLocationPermissions = async () => {
+    setAskingPermissions(true);
+    setPermissionError("");
+    try {
+      // 1. Camera check
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("Media Devices API is not supported by your browser.");
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: false,
+      });
+      // Stop initial verification stream; CameraProctor handles persistent feed
+      stream.getTracks().forEach((t) => t.stop());
+
+      // 2. Geolocation check
+      if (!navigator.geolocation) {
+        throw new Error("Geolocation is not supported by your browser.");
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const loc = {
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            timestamp: new Date(),
+          };
+          setUserLocation(loc);
+          setPermissionGranted(true);
+          setAskingPermissions(false);
+        },
+        (geoErr) => {
+          setPermissionError(
+            "Location access denied. Please click the lock icon in your browser address bar and enable Location & Camera."
+          );
+          setAskingPermissions(false);
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    } catch (err) {
+      setPermissionError(
+        err.message ||
+          "Camera permission denied. Please allow camera access to take this exam."
+      );
+      setAskingPermissions(false);
+    }
+  };
+
+  // Trigger violation reporting with debouncing (Phase 8 Anti-Cheat)
+  const reportViolation = async (violationType, defaultReason) => {
+    if (!attempt || attempt.status !== "in_progress") return;
+    const now = Date.now();
+    // Debounce violation reports within 2 seconds
+    if (now - lastViolationTimeRef.current < 2000) return;
+    lastViolationTimeRef.current = now;
+
+    try {
+      const res = await API.post(`/exams/attempts/${attempt._id}/violation`, {
+        type: violationType,
+        reason: defaultReason,
+        deviceInfo: {
+          userAgent: navigator.userAgent,
+          screenResolution: `${window.screen.width}x${window.screen.height}`,
+        },
+      });
+
+      if (res.data?.success) {
+        setTabSwitchCount(res.data.warningCount);
+        setMaxWarnings(res.data.maxWarnings || 3);
+        setViolationMessage(
+          res.data.autoSubmitted
+            ? "You have exceeded the maximum warning limit. Your exam was automatically submitted."
+            : `Warning ${res.data.warningCount} of ${res.data.maxWarnings}: ${defaultReason}`
+        );
+        setShowTabWarning(true);
+
+        if (res.data.autoSubmitted) {
+          if (heartbeatIntervalRef.current)
+            clearInterval(heartbeatIntervalRef.current);
+          if (timerRef.current) clearInterval(timerRef.current);
+          window.alert(
+            "Maximum warnings reached. Your examination has been automatically submitted."
+          );
+          navigate(`/exams/${id}/results`);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to report violation:", err.message);
+    }
+  };
+
+  // Handle Face Proctoring State Changes during exam
+  const handleFaceProctorState = async (status, details) => {
+    if (!attempt || attempt.status !== "in_progress") return;
+
+    if (["face_out_of_frame", "no_face", "multiple_faces"].includes(status)) {
+      if (!isFacePaused) {
+        setIsFacePaused(true);
+        // Start duration counter for paused overlay
+        if (!facePauseIntervalRef.current) {
+          facePauseIntervalRef.current = setInterval(() => {
+            setFacePauseDurationSec((prev) => prev + 1);
+          }, 1000);
+        }
+
+        reportViolation(
+          status,
+          details?.message || "Face is out of guide frame."
+        );
+      }
+    } else if (status === "in_frame") {
+      if (isFacePaused) {
+        setIsFacePaused(false);
+        if (facePauseIntervalRef.current) {
+          clearInterval(facePauseIntervalRef.current);
+          facePauseIntervalRef.current = null;
+        }
+
+        try {
+          await API.post(`/exams/attempts/${attempt._id}/violation`, {
+            type: "face_resumed",
+            reason: "Face returned to center frame",
+          });
+        } catch (_) {}
+      }
+    }
+  };
+  useEffect(() => {
+    if (!attempt || attempt.status !== "in_progress") return;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        reportViolation(
+          "tab_switch",
+          "You switched browser tabs or minimized the window."
+        );
+      }
+    };
+
+    const handleWindowBlur = () => {
+      reportViolation(
+        "window_blur",
+        "Exam window lost focus. Please stay on the examination screen."
+      );
+    };
+
+    const handleFullscreenExit = () => {
+      if (!document.fullscreenElement) {
+        setIsFullscreen(false);
+        reportViolation("fullscreen_exit", "You exited full-screen mode.");
+      }
+    };
+
+    const handleKeyDown = (e) => {
+      // Prevent dev tools, copy, paste, print shortcuts
+      if (
+        (e.ctrlKey &&
+          ["c", "v", "x", "p", "s", "u", "a"].includes(e.key.toLowerCase())) ||
+        (e.metaKey &&
+          ["c", "v", "x", "p", "s", "u", "a"].includes(e.key.toLowerCase())) ||
+        ["F12"].includes(e.key)
+      ) {
+        e.preventDefault();
+        reportViolation(
+          "restricted_shortcut",
+          `Restricted key combination attempted (${e.key.toUpperCase()}).`
+        );
+      }
+    };
+
+    const handleContextMenu = (e) => {
+      e.preventDefault();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", handleWindowBlur);
+    document.addEventListener("fullscreenchange", handleFullscreenExit);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("contextmenu", handleContextMenu);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleWindowBlur);
+      document.removeEventListener("fullscreenchange", handleFullscreenExit);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("contextmenu", handleContextMenu);
+    };
+  }, [attempt]);
+
+  // 4. Background Heartbeat Ping (Every 15s to maintain live status)
+  useEffect(() => {
+    if (!attempt || attempt.status !== "in_progress") return;
+
+    heartbeatIntervalRef.current = setInterval(async () => {
+      try {
+        const res = await API.post(`/exams/attempts/${attempt._id}/heartbeat`);
+        if (res.data?.timeRemainingSeconds !== undefined) {
+          setSecondsRemaining(res.data.timeRemainingSeconds);
+        }
+        if (res.data?.status === "auto_submitted") {
+          clearInterval(heartbeatIntervalRef.current);
+          window.alert(
+            "Your exam session has expired or was submitted by an administrator."
+          );
+          navigate(`/exams/${id}/results`);
+        }
+      } catch (err) {
+        console.warn("Heartbeat ping failed:", err.message);
+      }
+    }, 15000);
+
+    return () => {
+      if (heartbeatIntervalRef.current)
+        clearInterval(heartbeatIntervalRef.current);
+    };
+  }, [attempt]);
+
+  // Mark current question as visited
+  const currentQ = questions[currentQIndex];
+  const currentQId = currentQ
+    ? currentQ.questionId
+      ? currentQ.questionId.toString()
+      : currentQ._id.toString()
+    : null;
+
+  useEffect(() => {
+    if (currentQId && responses[currentQId] && !responses[currentQId].visited) {
+      setResponses((prev) => ({
+        ...prev,
+        [currentQId]: { ...prev[currentQId], visited: true },
+      }));
+    }
+  }, [currentQIndex, currentQId]);
+
+  // Save current answer incrementally to dedicated AttemptAnswer backend
+  const saveAnswerToBackend = async (qId, answerData) => {
+    if (!attempt) return;
+    setSavingStatus("saving");
+    seqRef.current += 1;
+    try {
+      await API.put(`/exams/attempts/${attempt._id}/answers/${qId}`, {
+        answer: answerData.studentAnswer,
+        clientSeq: seqRef.current,
+        clientTimestamp: new Date(),
+        isMarkedForReview: answerData.isMarkedForReview,
+        visited: true,
+        sectionId: currentQ?.sectionId || "sec_1",
+        questionType: currentQ?.questionType || "single_mcq",
+      });
+      setSavingStatus("saved");
+    } catch (err) {
+      // Fallback to old save endpoint if needed
+      try {
+        await API.post("/exams/save-answer", {
+          attemptId: attempt._id,
+          questionId: qId,
+          studentAnswer: answerData.studentAnswer,
+          isMarkedForReview: answerData.isMarkedForReview,
+          visited: true,
+        });
+        setSavingStatus("saved");
+      } catch (e) {
+        setSavingStatus("error");
+      }
+    }
+  };
+
+  const handleSelectAnswer = (value) => {
+    if (!currentQId) return;
+    const isAns = value !== null && value !== undefined && value !== "";
+    const updated = {
+      ...responses[currentQId],
+      studentAnswer: value,
+      isAnswered: isAns,
+      visited: true,
+    };
+    setResponses((prev) => ({ ...prev, [currentQId]: updated }));
+    saveAnswerToBackend(currentQId, updated);
+  };
+
+  const handleToggleMultiSelect = (optId) => {
+    if (!currentQId) return;
+    const currentList = Array.isArray(responses[currentQId]?.studentAnswer)
+      ? [...responses[currentQId].studentAnswer]
+      : [];
+    const updatedList = currentList.includes(optId)
+      ? currentList.filter((id) => id !== optId)
+      : [...currentList, optId];
+
+    handleSelectAnswer(updatedList);
+  };
+
+  const handleClearResponse = () => {
+    if (!currentQId) return;
+    const cleared = {
+      ...responses[currentQId],
+      studentAnswer: null,
+      isAnswered: false,
+    };
+    setResponses((prev) => ({ ...prev, [currentQId]: cleared }));
+    saveAnswerToBackend(currentQId, cleared);
+  };
+
+  const handleMarkForReviewAndNext = () => {
+    if (!currentQId) return;
+    const updated = {
+      ...responses[currentQId],
+      isMarkedForReview: !responses[currentQId]?.isMarkedForReview,
+      visited: true,
+    };
+    setResponses((prev) => ({ ...prev, [currentQId]: updated }));
+    saveAnswerToBackend(currentQId, updated);
+
+    if (currentQIndex < questions.length - 1) {
+      setCurrentQIndex((prev) => prev + 1);
+    }
+  };
+
+  const handleSaveAndNext = () => {
+    if (currentQId && responses[currentQId]) {
+      saveAnswerToBackend(currentQId, responses[currentQId]);
+    }
+    if (currentQIndex < questions.length - 1) {
+      setCurrentQIndex((prev) => prev + 1);
+    }
+  };
+
+  // Final Submission Handler (with network error preservation & retry)
+  const handleFinalSubmit = async (isTimeout = false) => {
+    if (!attempt) return;
+    setLoading(true);
+    setHasNetworkSubmitError(false);
+
+    // Stop heartbeat immediately upon submission
+    if (heartbeatIntervalRef.current) {
+      clearInterval(heartbeatIntervalRef.current);
+      heartbeatIntervalRef.current = null;
+    }
+
+    // Save snapshot of responses to localStorage as safety backup
+    try {
+      localStorage.setItem(
+        `backup_attempt_${attempt._id}`,
+        JSON.stringify(responses)
+      );
+    } catch (_) {}
+
+    try {
+      const res = await API.post("/exams/submit-attempt", {
+        attemptId: attempt._id,
+        submissionType: isTimeout ? "auto_timeout" : "manual",
+      });
+      // Clear any and all saved local attempt data on submit
+      try {
+        localStorage.removeItem(`backup_attempt_${attempt._id}`);
+        Object.keys(localStorage).forEach((key) => {
+          if (key.includes(attempt._id) || key.includes(id)) {
+            localStorage.removeItem(key);
+          }
+        });
+      } catch (_) {}
+
+      if (res.data?.success) {
+        window.alert(
+          isTimeout
+            ? "Exam duration has ended. Your responses were automatically submitted."
+            : "Examination submitted successfully!"
+        );
+        navigate(`/exams/${id}/results`, { replace: true });
+      }
+    } catch (err) {
+      if (err.response?.status === 409) {
+        try {
+          localStorage.removeItem(`backup_attempt_${attempt._id}`);
+          Object.keys(localStorage).forEach((key) => {
+            if (key.includes(attempt._id) || key.includes(id)) {
+              localStorage.removeItem(key);
+            }
+          });
+        } catch (_) {}
+        navigate(`/exams/${id}/results`, { replace: true });
+        return;
+      }
+      setHasNetworkSubmitError(true);
+      window.alert(
+        err.response?.data?.message ||
+          'Network error during submission. Your responses are saved locally. Please click "Retry Submission".'
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAutoSubmit = () => {
+    handleFinalSubmit(true);
+  };
+
+  // Fullscreen toggle
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement
+        .requestFullscreen()
+        .then(() => setIsFullscreen(true))
+        .catch(() => {});
+    } else {
+      document
+        .exitFullscreen()
+        .then(() => setIsFullscreen(false))
+        .catch(() => {});
+    }
+  };
+
+  // Calculator evaluation
+  const handleCalcClick = (val) => {
+    if (val === "C") {
+      setCalcInput("");
+      setCalcResult("");
+    } else if (val === "=") {
+      try {
+        // Safe evaluation of basic math expressions
+        const sanitized = calcInput.replace(/[^0-9+\-*/().]/g, "");
+        const res = Function(`"use strict"; return (${sanitized})`)();
+        setCalcResult(String(res));
+      } catch {
+        setCalcResult("Error");
+      }
+    } else {
+      setCalcInput((prev) => prev + val);
+    }
+  };
+
+  // Format Time (HH:MM:SS)
+  const formatTime = (secs) => {
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    if (h > 0) {
+      return `${String(h).padStart(2, "0")}:${String(m).padStart(
+        2,
+        "0"
+      )}:${String(s).padStart(2, "0")}`;
+    }
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  };
+
+  // Palette Status Counts
+  const answeredCount = Object.values(responses).filter(
+    (r) => r.isAnswered && !r.isMarkedForReview
+  ).length;
+  const markedReviewCount = Object.values(responses).filter(
+    (r) => r.isMarkedForReview && !r.isAnswered
+  ).length;
+  const answeredAndMarkedCount = Object.values(responses).filter(
+    (r) => r.isAnswered && r.isMarkedForReview
+  ).length;
+  const visitedUnansweredCount = Object.values(responses).filter(
+    (r) => r.visited && !r.isAnswered && !r.isMarkedForReview
+  ).length;
+  const notVisitedCount =
+    questions.length -
+    (answeredCount +
+      markedReviewCount +
+      answeredAndMarkedCount +
+      visitedUnansweredCount);
+
+  // Phase 6 Permission Check Screen
+  if (!permissionGranted) {
+    return (
+      <div className="d-flex align-items-center justify-content-center vh-100 bg-light p-4">
+        <div
+          className="card border-0 shadow-lg rounded-4 p-4 text-center"
+          style={{ maxWidth: "540px" }}
+        >
+          <div className="mb-3 text-primary">
+            <Camera size={48} className="mx-auto" />
+          </div>
+          <h4 className="fw-bold text-dark mb-2">
+            Device & Integrity Verification
+          </h4>
+          <p className="text-muted small mb-4">
+            This examination is conducted under real-time proctoring. You must
+            grant access to your <strong>Camera</strong> and{" "}
+            <strong>Geolocation</strong> before the examination paper can be
+            unlocked.
+          </p>
+
+          {permissionError && (
+            <div className="alert alert-danger text-start small mb-3">
+              <AlertTriangle size={16} className="inline me-2 text-danger" />
+              {permissionError}
+              <div className="mt-2 text-dark fw-semibold">How to allow:</div>
+              <ol
+                className="ps-3 mb-0 text-muted"
+                style={{ fontSize: "0.8rem" }}
+              >
+                <li>Click the tune/lock icon in your browser URL bar.</li>
+                <li>
+                  Set "Camera" and "Location" to <strong>Allow</strong>.
+                </li>
+                <li>Click "Grant Permissions & Start" below.</li>
+              </ol>
+            </div>
+          )}
+
+          <div className="d-flex flex-column gap-2">
+            <button
+              className="btn btn-primary fw-bold py-2 rounded-3"
+              onClick={requestMediaAndLocationPermissions}
+              disabled={askingPermissions}
+            >
+              {askingPermissions
+                ? "Checking Device Access..."
+                : "Grant Permissions & Start Exam"}
+            </button>
+            <button
+              className="btn btn-outline-secondary btn-sm rounded-3"
+              onClick={() => navigate("/exams")}
+            >
+              Return to Exam List
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="d-flex align-items-center justify-content-center vh-100 bg-light">
+        <div className="text-center">
+          <div
+            className="spinner-border text-primary mb-3"
+            style={{ width: "3rem", height: "3rem" }}
+          />
+          <h5 className="fw-bold text-dark">
+            Initializing Secure Examination Interface...
+          </h5>
+          <p className="text-muted small">
+            Synchronizing timer and exam snapshot with server
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (initError) {
+    return (
+      <div className="d-flex align-items-center justify-content-center vh-100 bg-light p-4">
+        <div
+          className="card border-0 shadow-lg rounded-4 p-4 text-center"
+          style={{ maxWidth: "480px" }}
+        >
+          <AlertTriangle size={48} className="text-danger mx-auto mb-3" />
+          <h5 className="fw-bold text-dark">Unable to Load Examination</h5>
+          <p className="text-muted small mb-4">{initError}</p>
+          <div className="d-flex justify-content-center gap-2">
+            <button
+              className="btn btn-primary px-4 rounded-3"
+              onClick={initExam}
+            >
+              Retry
+            </button>
+            <button
+              className="btn btn-outline-secondary px-4 rounded-3"
+              onClick={() => navigate("/exams")}
+            >
+              Back to Exams
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentQ) {
+    return (
+      <div className="d-flex align-items-center justify-content-center vh-100 bg-light p-4">
+        <div
+          className="card border-0 shadow-lg rounded-4 p-4 text-center"
+          style={{ maxWidth: "480px" }}
+        >
+          <AlertTriangle size={48} className="text-warning mx-auto mb-3" />
+          <h5 className="fw-bold text-dark">No Questions Found</h5>
+          <p className="text-muted small mb-4">
+            This examination does not currently contain any questions.
+          </p>
+          <button
+            className="btn btn-primary px-4 rounded-3 mx-auto"
+            onClick={() => navigate("/exams")}
+          >
+            Return to Exam Hub
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const currentResp = responses[currentQId] || {};
+  const isTimeCritical = secondsRemaining < 300; // Under 5 mins
+
+  return (
+    <div
+      style={{
+        backgroundColor: "#f1f5f9",
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      {/* Top Banner Notice when Resuming Exam */}
+      {resumedNotice && (
+        <div className="bg-primary text-white py-2 px-4 d-flex justify-content-between align-items-center shadow-sm small">
+          <div className="d-flex align-items-center gap-2">
+            <CheckCircle2 size={16} />
+            <span>
+              Welcome back, your examination session has been resumed safely
+              with your remaining server time.
+            </span>
+          </div>
+          <button
+            className="btn-close btn-close-white"
+            style={{ transform: "scale(0.8)" }}
+            onClick={() => setResumedNotice(false)}
+          />
+        </div>
+      )}
+
+      {/* 1. TOP SECURE EXAM HEADER */}
+      <header className="bg-white border-bottom px-4 py-2 d-flex justify-content-between align-items-center shadow-sm">
+        <div className="d-flex align-items-center gap-3">
+          <div className="rounded-3 bg-primary text-white p-2 fw-bold">NEO</div>
+          <div>
+            <h5 className="fw-bold text-dark mb-0">{exam.title}</h5>
+            <small className="text-muted">
+              {exam.subject} • Class: {exam.classGrade} • Candidate:{" "}
+              <strong>{currentUser?.name}</strong> ({currentUser?.schoolId})
+            </small>
+          </div>
+        </div>
+
+        {/* Center: Authoritative Countdown Timer & Warning Badge */}
+        <div className="d-flex align-items-center gap-2">
+          {tabSwitchCount > 0 && (
+            <span
+              className={`badge px-3 py-2 rounded-pill fw-bold ${
+                tabSwitchCount >= maxWarnings
+                  ? "bg-danger text-white"
+                  : "bg-warning text-dark"
+              }`}
+            >
+              <ShieldAlert size={14} className="inline me-1" />
+              Warnings: {tabSwitchCount}/{maxWarnings}
+            </span>
+          )}
+
+          <div
+            className={`d-flex align-items-center gap-2 px-3 py-1 rounded-pill fw-bold font-monospace shadow-sm ${
+              isTimeCritical
+                ? "bg-danger text-white animate-pulse"
+                : "bg-dark text-white"
+            }`}
+            style={{ fontSize: "1.25rem", letterSpacing: "1px" }}
+          >
+            <Clock
+              size={20}
+              className={isTimeCritical ? "animate-bounce" : ""}
+            />
+            <span>{formatTime(secondsRemaining)}</span>
+          </div>
+
+          {exam.calculatorAllowed && (
+            <button
+              className={`btn btn-sm rounded-pill p-2 ${
+                showCalculator ? "btn-primary" : "btn-outline-secondary"
+              }`}
+              onClick={() => setShowCalculator(!showCalculator)}
+              title="Open Calculator"
+            >
+              <Calculator size={18} />
+            </button>
+          )}
+
+          <button
+            className={`btn btn-sm rounded-pill p-2 ${
+              showRoughWork ? "btn-primary" : "btn-outline-secondary"
+            }`}
+            onClick={() => setShowRoughWork(!showRoughWork)}
+            title="Open Rough Work Workspace"
+          >
+            <Edit3 size={18} />
+          </button>
+
+          <button
+            className="btn btn-outline-secondary btn-sm rounded-pill p-2"
+            onClick={toggleFullscreen}
+            title={isFullscreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+          >
+            {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+          </button>
+        </div>
+
+        {/* Right: Autosave status & Submit */}
+        <div className="d-flex align-items-center gap-3">
+          <div className="small">
+            {savingStatus === "saving" && (
+              <span className="text-muted">Saving response...</span>
+            )}
+            {savingStatus === "saved" && (
+              <span className="text-success">
+                <CheckCircle2 size={14} className="inline me-1" />
+                Saved
+              </span>
+            )}
+            {savingStatus === "error" && (
+              <span className="text-danger">
+                <AlertTriangle size={14} className="inline me-1" />
+                Save Error
+              </span>
+            )}
+          </div>
+          <button
+            className="btn btn-success fw-bold px-4 py-2 rounded-3 shadow-sm d-flex align-items-center gap-2"
+            onClick={() => setShowSubmitModal(true)}
+          >
+            <Send size={16} /> Submit Exam
+          </button>
+        </div>
+      </header>
+
+      {/* 2. MAIN TEST CONTENT & PALETTE SPLIT LAYOUT */}
+      <div
+        className="d-flex flex-grow-1 overflow-hidden position-relative"
+        style={{ height: "calc(100vh - 65px)" }}
+      >
+        {/* FACE OUT OF FRAME PAUSE OVERLAY */}
+        {isFacePaused && (
+          <div
+            className="position-absolute top-0 start-0 w-100 h-100 d-flex flex-column align-items-center justify-content-center text-center p-4 z-3"
+            style={{
+              backgroundColor: "rgba(15, 23, 42, 0.85)",
+              backdropFilter: "blur(8px)",
+            }}
+            data-testid="face-pause-overlay"
+          >
+            <div
+              className="card border-0 shadow-lg p-4 rounded-4"
+              style={{ maxWidth: "480px" }}
+            >
+              <div className="text-warning mb-3">
+                <AlertTriangle size={48} className="mx-auto" />
+              </div>
+              <h4 className="fw-bold text-dark mb-2">Exam Paused</h4>
+              <p className="text-muted small mb-3">
+                Please keep your face centered inside the guide box. The
+                examination answers are temporarily blurred and disabled for
+                integrity.
+              </p>
+              <div className="p-3 bg-light rounded-3 mb-3 border">
+                <div className="text-secondary small">Pause Duration:</div>
+                <div className="fs-4 fw-bold text-primary font-monospace">
+                  {Math.floor(facePauseDurationSec / 60)}m{" "}
+                  {facePauseDurationSec % 60}s
+                </div>
+              </div>
+              <div className="text-muted small">
+                The exam will automatically resume once your face is aligned
+                inside the green border box for 2 seconds.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* LEFT / CENTER: QUESTION WORKSPACE */}
+        <div
+          className="flex-grow-1 d-flex flex-column bg-white p-4 overflow-y-auto"
+          style={{ borderRight: "1px solid #e2e8f0" }}
+        >
+          {/* Question Breadcrumb & Marks */}
+          <div className="d-flex justify-content-between align-items-center border-bottom pb-3 mb-3">
+            <div className="d-flex align-items-center gap-2">
+              <span className="badge bg-primary fs-6 px-3 py-2 rounded-3">
+                Question {currentQIndex + 1}
+              </span>
+              <span className="text-muted small fw-semibold">
+                of {questions.length}
+              </span>
+              <span className="badge bg-light text-dark border ms-2 text-uppercase">
+                {currentQ.sectionTitle}
+              </span>
+              <span className="badge bg-secondary-subtle text-secondary text-uppercase">
+                {currentQ.questionType?.replace("_", " ")}
+              </span>
+              {exam.status === "live" && (
+                <span className="badge bg-danger text-white d-flex align-items-center gap-1">
+                  <span
+                    className="spinner-grow spinner-grow-sm"
+                    style={{ width: 6, height: 6 }}
+                  />{" "}
+                  LIVE
+                </span>
+              )}
+            </div>
+
+            <div className="d-flex align-items-center gap-2">
+              <span className="badge bg-success-subtle text-success border border-success-subtle px-2 py-1">
+                +{currentQ.marks} Marks
+              </span>
+              {currentQ.negativeMarks > 0 && (
+                <span className="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1">
+                  -{currentQ.negativeMarks} Neg
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Reading Passage if passage_based / case_study */}
+          {currentQ.passageText && (
+            <div
+              className="p-3 bg-light rounded-3 mb-4 border small"
+              style={{ maxHeight: "200px", overflowY: "auto" }}
+            >
+              <strong className="text-dark d-block mb-1">
+                Reference Context / Passage:
+              </strong>
+              <div style={{ whiteSpace: "pre-wrap" }}>
+                {currentQ.passageText}
+              </div>
+            </div>
+          )}
+
+          {/* Question Stem */}
+          <div className="mb-4">
+            <h5
+              className="fw-semibold text-dark lh-base"
+              style={{ whiteSpace: "pre-wrap" }}
+            >
+              {currentQ.questionText}
+            </h5>
+            {currentQ.imageUrl && (
+              <div className="my-3 text-center">
+                <img
+                  src={currentQ.imageUrl}
+                  alt="Question Diagram"
+                  className="img-fluid rounded-3 border shadow-sm"
+                  style={{ maxHeight: "280px" }}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* RESPONSE CONTROLS (SPECIALIZED PER TYPE) */}
+          <div className="my-auto">
+            {/* 1. SINGLE MCQ & ASSERTION REASON */}
+            {["single_mcq", "assertion_reason"].includes(
+              currentQ.questionType
+            ) &&
+              currentQ.options && (
+                <div className="d-flex flex-column gap-3">
+                  {currentQ.options.map((opt, oIdx) => {
+                    const isSelected = currentResp.studentAnswer === opt.id;
+                    return (
+                      <div
+                        key={opt.id || oIdx}
+                        className={`p-3 rounded-3 border cursor-pointer transition-all d-flex align-items-center gap-3 ${
+                          isSelected
+                            ? "bg-primary-subtle border-primary shadow-sm fw-semibold text-primary"
+                            : "bg-light hover-bg-white text-dark"
+                        }`}
+                        style={{ cursor: "pointer" }}
+                        onClick={() => handleSelectAnswer(opt.id)}
+                      >
+                        <input
+                          type="radio"
+                          className="form-check-input mt-0"
+                          name="singleOptionRadio"
+                          checked={isSelected}
+                          onChange={() => handleSelectAnswer(opt.id)}
+                        />
+                        <span className="font-monospace fw-bold">
+                          ({String.fromCharCode(65 + oIdx)})
+                        </span>
+                        <span className="flex-grow-1">{opt.text}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+            {/* 2. MULTIPLE SELECT */}
+            {currentQ.questionType === "multiple_select" && currentQ.options && (
+              <div className="d-flex flex-column gap-3">
+                <small className="text-muted mb-1">
+                  Select all correct options that apply:
+                </small>
+                {currentQ.options.map((opt, oIdx) => {
+                  const isSelected =
+                    Array.isArray(currentResp.studentAnswer) &&
+                    currentResp.studentAnswer.includes(opt.id);
+                  return (
+                    <div
+                      key={opt.id || oIdx}
+                      className={`p-3 rounded-3 border cursor-pointer transition-all d-flex align-items-center gap-3 ${
+                        isSelected
+                          ? "bg-primary-subtle border-primary shadow-sm fw-semibold text-primary"
+                          : "bg-light hover-bg-white text-dark"
+                      }`}
+                      style={{ cursor: "pointer" }}
+                      onClick={() => handleToggleMultiSelect(opt.id)}
+                    >
+                      <input
+                        type="checkbox"
+                        className="form-check-input mt-0"
+                        checked={isSelected}
+                        onChange={() => handleToggleMultiSelect(opt.id)}
+                      />
+                      <span className="font-monospace fw-bold">
+                        ({String.fromCharCode(65 + oIdx)})
+                      </span>
+                      <span className="flex-grow-1">{opt.text}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* 3. TRUE / FALSE */}
+            {currentQ.questionType === "true_false" && (
+              <div className="d-flex gap-4 my-3">
+                <button
+                  type="button"
+                  className={`btn btn-lg flex-fill py-3 fw-bold rounded-4 border ${
+                    currentResp.studentAnswer === true ||
+                    currentResp.studentAnswer === "true"
+                      ? "btn-success shadow"
+                      : "btn-outline-secondary"
+                  }`}
+                  onClick={() => handleSelectAnswer(true)}
+                >
+                  TRUE
+                </button>
+                <button
+                  type="button"
+                  className={`btn btn-lg flex-fill py-3 fw-bold rounded-4 border ${
+                    currentResp.studentAnswer === false ||
+                    currentResp.studentAnswer === "false"
+                      ? "btn-danger shadow"
+                      : "btn-outline-secondary"
+                  }`}
+                  onClick={() => handleSelectAnswer(false)}
+                >
+                  FALSE
+                </button>
+              </div>
+            )}
+
+            {/* 4. FILL IN THE BLANKS / ONE WORD */}
+            {["fill_blanks", "one_word"].includes(currentQ.questionType) && (
+              <div className="my-3">
+                <label className="form-label small fw-semibold text-secondary">
+                  Your Answer Response:
+                </label>
+                <input
+                  type="text"
+                  className="form-control form-control-lg font-monospace"
+                  placeholder="Type answer here..."
+                  value={currentResp.studentAnswer || ""}
+                  onChange={(e) => handleSelectAnswer(e.target.value)}
+                />
+              </div>
+            )}
+
+            {/* 5. NUMERICAL ANSWER */}
+            {currentQ.questionType === "numerical" && (
+              <div className="my-3">
+                <label className="form-label small fw-semibold text-secondary">
+                  Enter Numerical Value:
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  className="form-control form-control-lg font-monospace"
+                  placeholder="e.g. 44"
+                  value={currentResp.studentAnswer || ""}
+                  onChange={(e) => handleSelectAnswer(e.target.value)}
+                />
+                <small className="text-muted mt-1 d-block">
+                  Rounding tolerance of ±{currentQ.numericalTolerance || 0} is
+                  configured.
+                </small>
+              </div>
+            )}
+
+            {/* 6. MATCH THE FOLLOWING */}
+            {currentQ.questionType === "match_following" &&
+              currentQ.matchPairs && (
+                <div className="my-3 p-3 bg-light rounded-3 border">
+                  <h6 className="fw-semibold text-dark mb-3">
+                    Match pairs from Column 1 to Column 2:
+                  </h6>
+                  {currentQ.matchPairs.map((pair, pIdx) => {
+                    const currentMatched = Array.isArray(
+                      currentResp.studentAnswer
+                    )
+                      ? currentResp.studentAnswer.find(
+                          (m) => m.left === pair.left
+                        )?.right || ""
+                      : "";
+                    return (
+                      <div
+                        key={pIdx}
+                        className="row g-2 align-items-center mb-3"
+                      >
+                        <div className="col-5 fw-semibold text-dark">
+                          {pair.left}
+                        </div>
+                        <div className="col-1 text-center text-muted">➔</div>
+                        <div className="col-6">
+                          <select
+                            className="form-select form-select-sm"
+                            value={currentMatched}
+                            onChange={(e) => {
+                              const currentArr = Array.isArray(
+                                currentResp.studentAnswer
+                              )
+                                ? [...currentResp.studentAnswer]
+                                : [];
+                              const updated = currentArr.filter(
+                                (m) => m.left !== pair.left
+                              );
+                              if (e.target.value) {
+                                updated.push({
+                                  left: pair.left,
+                                  right: e.target.value,
+                                });
+                              }
+                              handleSelectAnswer(updated);
+                            }}
+                          >
+                            <option value="">Select Matching Option...</option>
+                            {currentQ.matchPairs.map((p, optIdx) => (
+                              <option key={optIdx} value={p.right}>
+                                {p.right}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+            {/* 7. DESCRIPTIVE SHORT / LONG ANSWER / CASE STUDY */}
+            {[
+              "short_answer",
+              "long_answer",
+              "case_study",
+              "passage_based",
+              "diagram_based",
+              "image_based",
+            ].includes(currentQ.questionType) && (
+              <div className="my-3">
+                <div className="d-flex justify-content-between align-items-center mb-1">
+                  <label className="form-label small fw-semibold text-secondary mb-0">
+                    Detailed Written Answer:
+                  </label>
+                  <span className="small text-muted font-monospace">
+                    Words:{" "}
+                    {currentResp.studentAnswer
+                      ? currentResp.studentAnswer
+                          .trim()
+                          .split(/\s+/)
+                          .filter(Boolean).length
+                      : 0}
+                  </span>
+                </div>
+                <textarea
+                  rows="6"
+                  className="form-control"
+                  placeholder="Type your complete solution or response steps here..."
+                  value={currentResp.studentAnswer || ""}
+                  onChange={(e) => handleSelectAnswer(e.target.value)}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* BOTTOM WORKSPACE ACTION BUTTONS */}
+          <div className="border-top pt-3 mt-4 d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div className="d-flex gap-2">
+              <button
+                type="button"
+                className="btn btn-outline-secondary btn-sm rounded-3 px-3 d-flex align-items-center gap-1"
+                onClick={handleClearResponse}
+                disabled={!currentResp.isAnswered}
+              >
+                <RotateCcw size={14} /> Clear Response
+              </button>
+              <button
+                type="button"
+                className={`btn btn-sm rounded-3 px-3 d-flex align-items-center gap-1 ${
+                  currentResp.isMarkedForReview
+                    ? "btn-warning text-dark"
+                    : "btn-outline-warning text-dark"
+                }`}
+                onClick={handleMarkForReviewAndNext}
+              >
+                <Bookmark size={14} />{" "}
+                {currentResp.isMarkedForReview
+                  ? "Unmark Review"
+                  : "Mark for Review"}
+              </button>
+            </div>
+
+            <div className="d-flex gap-2">
+              <button
+                type="button"
+                className="btn btn-outline-dark btn-sm rounded-3 px-3 d-flex align-items-center gap-1"
+                onClick={() =>
+                  setCurrentQIndex((prev) => Math.max(0, prev - 1))
+                }
+                disabled={currentQIndex === 0 || !exam.allowPreviousNavigation}
+              >
+                <ChevronLeft size={16} /> Previous
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm rounded-3 px-4 fw-semibold d-flex align-items-center gap-1 shadow-sm"
+                style={{ backgroundColor: "#2563eb" }}
+                onClick={handleSaveAndNext}
+              >
+                Save & Next <ChevronRight size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT: QUESTION NAVIGATION PALETTE */}
+        <div
+          className="bg-light p-3 d-flex flex-column overflow-y-auto"
+          style={{ width: "320px", minWidth: "320px" }}
+        >
+          <h6 className="fw-bold text-dark mb-3">Question Palette</h6>
+
+          {/* Legend Counters */}
+          <div className="row g-2 mb-3 small" style={{ fontSize: "0.75rem" }}>
+            <div className="col-6">
+              <div className="d-flex align-items-center gap-2">
+                <span
+                  className="badge rounded-circle bg-success p-2"
+                  style={{ width: 14, height: 14 }}
+                />
+                <span>
+                  Answered: <strong>{answeredCount}</strong>
+                </span>
+              </div>
+            </div>
+            <div className="col-6">
+              <div className="d-flex align-items-center gap-2">
+                <span
+                  className="badge rounded-circle bg-danger p-2"
+                  style={{ width: 14, height: 14 }}
+                />
+                <span>
+                  Unanswered: <strong>{visitedUnansweredCount}</strong>
+                </span>
+              </div>
+            </div>
+            <div className="col-6">
+              <div className="d-flex align-items-center gap-2">
+                <span
+                  className="badge rounded-circle bg-warning p-2"
+                  style={{ width: 14, height: 14 }}
+                />
+                <span>
+                  Review: <strong>{markedReviewCount}</strong>
+                </span>
+              </div>
+            </div>
+            <div className="col-6">
+              <div className="d-flex align-items-center gap-2">
+                <span
+                  className="badge rounded-circle bg-secondary p-2"
+                  style={{ width: 14, height: 14 }}
+                />
+                <span>
+                  Not Visited: <strong>{notVisitedCount}</strong>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Live Proctoring Camera Feed */}
+          <div className="mb-3 p-2 bg-white rounded-3 border">
+            <div className="d-flex align-items-center justify-content-between mb-2">
+              <span className="small fw-bold text-dark d-flex align-items-center gap-1">
+                <Camera size={14} className="text-primary" /> Live Proctoring
+              </span>
+              <ExamVideoRecorder
+                stream={activeMediaStream}
+                attemptId={attempt?._id}
+                isExamActive={attempt?.status === "in_progress"}
+                // chunkIntervalMs={15000}
+              />
+            </div>
+            <CameraProctor
+              mode="during_exam"
+              required={false}
+              showPreview={true}
+              onFaceStateChange={handleFaceProctorState}
+              onStatusChange={(status, stream) => {
+                if (stream) setActiveMediaStream(stream);
+              }}
+            />
+          </div>
+
+          <hr className="my-2 opacity-25" />
+
+          {/* Question Grid Buttons */}
+          <div className="d-flex flex-wrap gap-2 my-2">
+            {questions.map((q, idx) => {
+              const qId = q.questionId
+                ? q.questionId.toString()
+                : q._id.toString();
+              const resp = responses[qId] || {};
+              const isCurrent = currentQIndex === idx;
+
+              let btnClass = "bg-secondary text-white"; // Not visited
+              if (resp.visited && !resp.isAnswered && !resp.isMarkedForReview)
+                btnClass = "bg-danger text-white";
+              if (resp.isAnswered && !resp.isMarkedForReview)
+                btnClass = "bg-success text-white";
+              if (resp.isMarkedForReview && !resp.isAnswered)
+                btnClass = "bg-warning text-dark";
+              if (resp.isAnswered && resp.isMarkedForReview)
+                btnClass =
+                  "bg-warning text-dark border border-success border-3";
+
+              return (
+                <button
+                  key={idx}
+                  type="button"
+                  className={`btn btn-sm rounded-circle fw-bold p-0 d-flex align-items-center justify-content-center ${btnClass} ${
+                    isCurrent ? "ring-2 ring-primary ring-offset-2" : ""
+                  }`}
+                  style={{ width: "38px", height: "38px", fontSize: "0.85rem" }}
+                  onClick={() => {
+                    if (exam.questionNavigation === "free") {
+                      setCurrentQIndex(idx);
+                    }
+                  }}
+                  disabled={exam.questionNavigation !== "free"}
+                >
+                  {idx + 1}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Floating On-Screen Calculator */}
+          {showCalculator && (
+            <div className="mt-auto pt-2">
+              <SafeCalculator
+                mode={
+                  typeof exam.calculatorAllowed === "string"
+                    ? exam.calculatorAllowed
+                    : "scientific"
+                }
+                onClose={() => setShowCalculator(false)}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Draggable Rough Work Panel */}
+      {showRoughWork && (
+        <RoughWorkPanel
+          attemptId={attempt?._id}
+          onClose={() => setShowRoughWork(false)}
+        />
+      )}
+
+      {/* 3. CONFIRMATION MODAL BEFORE SUBMIT */}
+      {showSubmitModal && (
+        <div
+          className="modal show d-block"
+          style={{ backgroundColor: "rgba(0,0,0,0.5)", zIndex: 1060 }}
+        >
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content border-0 rounded-4 shadow">
+              <div className="modal-header border-bottom">
+                <h5 className="modal-title fw-bold text-dark">
+                  Confirm Examination Submission
+                </h5>
+                <button
+                  className="btn-close"
+                  onClick={() => setShowSubmitModal(false)}
+                />
+              </div>
+              <div className="modal-body p-4 text-center">
+                <p className="text-secondary small mb-3">
+                  Please review your attempt summary before final submission.
+                  Once submitted, your answers will be locked for grading.
+                </p>
+
+                <div className="row g-2 mb-4">
+                  <div className="col-6">
+                    <div className="p-3 bg-success-subtle rounded-3 text-success">
+                      <h4 className="fw-bold mb-0">
+                        {answeredCount + answeredAndMarkedCount}
+                      </h4>
+                      <small className="fw-semibold">Total Answered</small>
+                    </div>
+                  </div>
+                  <div className="col-6">
+                    <div className="p-3 bg-danger-subtle rounded-3 text-danger">
+                      <h4 className="fw-bold mb-0">
+                        {visitedUnansweredCount + notVisitedCount}
+                      </h4>
+                      <small className="fw-semibold">Unanswered</small>
+                    </div>
+                  </div>
+                  <div className="col-6">
+                    <div className="p-3 bg-warning-subtle rounded-3 text-warning-emphasis">
+                      <h4 className="fw-bold mb-0">{markedReviewCount}</h4>
+                      <small className="fw-semibold">Marked for Review</small>
+                    </div>
+                  </div>
+                  <div className="col-6">
+                    <div className="p-3 bg-light rounded-3 text-secondary">
+                      <h4 className="fw-bold mb-0">
+                        {formatTime(secondsRemaining)}
+                      </h4>
+                      <small className="fw-semibold">Time Remaining</small>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="alert alert-warning border-0 small d-flex align-items-center gap-2 text-start">
+                  <AlertTriangle size={18} />
+                  <div>Are you sure you want to end your test session?</div>
+                </div>
+              </div>
+              <div className="modal-footer border-top">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  onClick={() => setShowSubmitModal(false)}
+                >
+                  Resume Exam
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-success fw-bold px-4"
+                  onClick={() => handleFinalSubmit(false)}
+                >
+                  Yes, Submit My Exam
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 4. ANTI-CHEAT TAB SWITCH & VIOLATION WARNING MODAL */}
+      {showTabWarning && (
+        <div
+          className="modal show d-block"
+          style={{ backgroundColor: "rgba(0,0,0,0.6)", zIndex: 1070 }}
+        >
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content border-0 rounded-4 shadow">
+              <div className="modal-body p-4 text-center">
+                <ShieldAlert size={48} className="text-danger mx-auto mb-2" />
+                <h5 className="fw-bold text-dark">
+                  Warning: Integrity Event Detected
+                </h5>
+                <p className="text-secondary small mb-3">
+                  {violationMessage ||
+                    `You left the exam screen. Warning ${tabSwitchCount} of ${maxWarnings}.`}
+                </p>
+                <div className="alert alert-danger small text-start mb-3">
+                  Exceeding {maxWarnings} warnings will immediately terminate
+                  your session and automatically submit your responses.
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary px-4 fw-semibold rounded-3"
+                  onClick={() => {
+                    setShowTabWarning(false);
+                    if (!document.fullscreenElement) {
+                      document.documentElement
+                        .requestFullscreen()
+                        .catch(() => {});
+                    }
+                  }}
+                >
+                  Return to Exam Screen
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. NETWORK SUBMIT ERROR RETRY MODAL */}
+      {hasNetworkSubmitError && (
+        <div
+          className="modal show d-block"
+          style={{ backgroundColor: "rgba(0,0,0,0.6)", zIndex: 1080 }}
+        >
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content border-0 rounded-4 shadow text-center p-4">
+              <AlertTriangle size={48} className="text-warning mx-auto mb-2" />
+              <h5 className="fw-bold text-dark">Network Issue Encountered</h5>
+              <p className="text-muted small mb-3">
+                We could not contact the server, but{" "}
+                <strong>
+                  all your answers are preserved safely on this device
+                </strong>
+                . Please check your internet connection and click retry.
+              </p>
+              <div className="d-flex justify-content-center gap-2">
+                <button
+                  className="btn btn-primary px-4 fw-bold rounded-3"
+                  onClick={() => handleFinalSubmit(false)}
+                >
+                  Retry Submission Now
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
