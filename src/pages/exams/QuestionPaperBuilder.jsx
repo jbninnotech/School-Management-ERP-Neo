@@ -1902,7 +1902,7 @@ export default function QuestionPaperBuilder() {
 
                       <div className="d-flex justify-content-end">
                         <button
-                          type="button"
+                          type="button"    
                           className="btn btn-primary rounded-3 px-4"
                           disabled={!importFile || importLoading}
                           onClick={async () => {
