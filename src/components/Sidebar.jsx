@@ -520,6 +520,103 @@ export default function Sidebar({ user }) {
             )}
           </Link>
 
+          {/* SECTION: ATTENDANCE MANAGEMENT */}
+          {role !== 'student' && (
+            <>
+              <div style={styles.navSectionTitle}>TEACHER ATTENDANCE</div>
+
+              {/* Teacher Self Service */}
+              {role === 'teacher' && (
+                <>
+                  <Link
+                    to="/attendance/teacher"
+                    className="sidebar-item-link"
+                    style={styles.navLink(isCurrentPath('/attendance/teacher'))}
+                    onClick={() => setIsMobileOpen(false)}
+                  >
+                    <CheckSquare className="me-2 text-emerald-400 flex-shrink-0" size={16} />
+                    <span className="text-truncate">Punch In / Terminal</span>
+                  </Link>
+
+                  <Link
+                    to="/attendance/history"
+                    className="sidebar-item-link"
+                    style={styles.navLink(isCurrentPath('/attendance/history'))}
+                    onClick={() => setIsMobileOpen(false)}
+                  >
+                    <CalendarCheck2 className="me-2 text-cyan-400 flex-shrink-0" size={16} />
+                    <span className="text-truncate">My Attendance History</span>
+                  </Link>
+                </>
+              )}
+
+              {/* Admin & Leadership Controls */}
+              {['superadmin', 'admin', 'principal'].includes(role) && (
+                <>
+                  <Link
+                    to="/attendance/admin"
+                    className="sidebar-item-link"
+                    style={styles.navLink(isCurrentPath('/attendance/admin'))}
+                    onClick={() => setIsMobileOpen(false)}
+                  >
+                    <Users className="me-2 text-primary flex-shrink-0" size={16} />
+                    <span className="text-truncate">Live Monitor Table</span>
+                  </Link>
+
+                  <Link
+                    to="/attendance/reports"
+                    className="sidebar-item-link"
+                    style={styles.navLink(isCurrentPath('/attendance/reports'))}
+                    onClick={() => setIsMobileOpen(false)}
+                  >
+                    <BarChart3 className="me-2 text-warning flex-shrink-0" size={16} />
+                    <span className="text-truncate">Attendance Analytics</span>
+                  </Link>
+
+                  <Link
+                    to="/attendance/schedules"
+                    className="sidebar-item-link"
+                    style={styles.navLink(isCurrentPath('/attendance/schedules'))}
+                    onClick={() => setIsMobileOpen(false)}
+                  >
+                    <Calendar className="me-2 text-info flex-shrink-0" size={16} />
+                    <span className="text-truncate">Shift Schedules</span>
+                  </Link>
+
+                  <Link
+                    to="/attendance/location"
+                    className="sidebar-item-link"
+                    style={styles.navLink(isCurrentPath('/attendance/location'))}
+                    onClick={() => setIsMobileOpen(false)}
+                  >
+                    <Layers className="me-2 text-danger flex-shrink-0" size={16} />
+                    <span className="text-truncate">Geofence (50m)</span>
+                  </Link>
+
+                  <Link
+                    to="/attendance/calendar"
+                    className="sidebar-item-link"
+                    style={styles.navLink(isCurrentPath('/attendance/calendar'))}
+                    onClick={() => setIsMobileOpen(false)}
+                  >
+                    <CalendarCheck2 className="me-2 text-purple-400 flex-shrink-0" size={16} />
+                    <span className="text-truncate">Holidays & Calendar</span>
+                  </Link>
+
+                  <Link
+                    to="/attendance/corrections"
+                    className="sidebar-item-link"
+                    style={styles.navLink(isCurrentPath('/attendance/corrections'))}
+                    onClick={() => setIsMobileOpen(false)}
+                  >
+                    <FileCheck2 className="me-2 text-teal-400 flex-shrink-0" size={16} />
+                    <span className="text-truncate">Correction Requests</span>
+                  </Link>
+                </>
+              )}
+            </>
+          )}
+
           {/* SECTION 3: FACULTY & STUDENTS (Hidden for Students) */}
           {role !== 'student' && (
             <>

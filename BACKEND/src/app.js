@@ -16,6 +16,7 @@ import categoryRoutes from './routes/categoryRoutes.js';
 import leaveRoutes from './routes/leaveRoutes.js';
 import timetableRoutes from './routes/timetableRoutes.js';
 import substitutionRoutes from './routes/substitutionRoutes.js';
+import attendanceRoutes from './routes/attendanceRoutes.js';
 
 const app = express();
 
@@ -121,6 +122,9 @@ app.use('/api/v1/timetable', timetableRoutes);
 
 app.use('/api/substitutions', substitutionRoutes);
 app.use('/api/v1/substitutions', substitutionRoutes);
+
+app.use('/api/attendance', attendanceRoutes);
+app.use('/api/v1/attendance', attendanceRoutes);
 
 // ─── 404 HANDLER ───────────────────────────────────────────────────────────
 app.use((req, res, next) => {

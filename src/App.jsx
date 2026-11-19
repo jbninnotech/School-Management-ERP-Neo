@@ -1,39 +1,41 @@
-import React from "react";
-import {
-  BrowserRouter as Router,
-  Routes,
-  Route,
-  Navigate,
-} from "react-router-dom";
-import Login from "./pages/auth/Login.jsx";
-import Dashboard from "./pages/dashboard/Dashboard.jsx";
-import AddTeacher from "./pages/teachers/AddTeacher.jsx";
-import TeacherList from "./pages/teachers/TeacherList.jsx";
-import StudentList from "./pages/students/StudentList.jsx";
-import AddStudent from "./pages/students/AddStudent.jsx";
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import Login from './pages/auth/Login.jsx';
+import Dashboard from './pages/dashboard/Dashboard.jsx';
+import AddTeacher from './pages/teachers/AddTeacher.jsx';
+import TeacherList from './pages/teachers/TeacherList.jsx';
+import StudentList from './pages/students/StudentList.jsx';
+import AddStudent from './pages/students/AddStudent.jsx';
 
 // Examinations System Modules
-import ExamList from "./pages/exams/ExamList.jsx";
-import CreateExamWizard from "./pages/exams/CreateExamWizard.jsx";
-import QuestionPaperBuilder from "./pages/exams/QuestionPaperBuilder.jsx";
-import QuestionPaperList from "./pages/exams/QuestionPaperList.jsx";
-import QuestionBank from "./pages/exams/QuestionBank.jsx";
-import ExamApproval from "./pages/exams/ExamApproval.jsx";
-import StudentExamInterface from "./pages/exams/StudentExamInterface.jsx";
-import ExamErrorBoundary from "./components/ExamErrorBoundary.jsx";
-import LiveExamMonitor from "./pages/exams/LiveExamMonitor.jsx";
-import LiveExamsSection from "./pages/exams/LiveExamsSection.jsx";
-import TeacherEvaluation from "./pages/exams/TeacherEvaluation.jsx";
-import ExamResultsDashboard from "./pages/exams/ExamResultsDashboard.jsx";
-import StudentResultView from "./pages/exams/StudentResultView.jsx";
-import StudentReport from "./pages/exams/StudentReport.jsx";
-import ExamPatterns from "./pages/exams/ExamPatterns.jsx";
-import VideoRecordingsManager from "./pages/exams/VideoRecordingsManager.jsx";
-import NotificationPage from "./pages/notifications/NotificationPage.jsx";
-import LeaveManagement from "./pages/leaves/LeaveManagement.jsx";
+import ExamList from './pages/exams/ExamList.jsx';
+import CreateExamWizard from './pages/exams/CreateExamWizard.jsx';
+import QuestionPaperBuilder from './pages/exams/QuestionPaperBuilder.jsx';
+import QuestionPaperList from './pages/exams/QuestionPaperList.jsx';
+import QuestionBank from './pages/exams/QuestionBank.jsx';
+import ExamApproval from './pages/exams/ExamApproval.jsx';
+import StudentExamInterface from './pages/exams/StudentExamInterface.jsx';
+import ExamErrorBoundary from './components/ExamErrorBoundary.jsx';
+import LiveExamMonitor from './pages/exams/LiveExamMonitor.jsx';
+import LiveExamsSection from './pages/exams/LiveExamsSection.jsx';
+import TeacherEvaluation from './pages/exams/TeacherEvaluation.jsx';
+import ExamResultsDashboard from './pages/exams/ExamResultsDashboard.jsx';
+import StudentResultView from './pages/exams/StudentResultView.jsx';
+import StudentReport from './pages/exams/StudentReport.jsx';
+import ExamPatterns from './pages/exams/ExamPatterns.jsx';
+import VideoRecordingsManager from './pages/exams/VideoRecordingsManager.jsx';
+import NotificationPage from './pages/notifications/NotificationPage.jsx';
+import LeaveManagement from './pages/leaves/LeaveManagement.jsx';
+import TeacherAttendanceDashboard from './pages/attendance/TeacherAttendanceDashboard.jsx';
+import AdminAttendanceDashboard from './pages/attendance/AdminAttendanceDashboard.jsx';
+import TeacherAttendanceHistory from './pages/attendance/TeacherAttendanceHistory.jsx';
+import AttendanceReports from './pages/attendance/AttendanceReports.jsx';
+import AttendanceScheduleManagement from './pages/attendance/AttendanceScheduleManagement.jsx';
+import GeofencingManagement from './pages/attendance/GeofencingManagement.jsx';
+import AttendanceCalendarManagement from './pages/attendance/AttendanceCalendarManagement.jsx';
+import AttendanceCorrectionsAdmin from './pages/attendance/AttendanceCorrectionsAdmin.jsx';
 
-import ProtectedRoute from "./components/ProtectedRoute.jsx";
-import ExamVideoRecorder from "./components/ExamVideoRecorder.jsx";
+import ProtectedRoute from './components/ProtectedRoute.jsx';
 
 export default function App() {
   return (
@@ -67,20 +69,80 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+        <Route path="/superadmin/dashboard" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/admin/dashboard" element={<Navigate to="/dashboard" replace />} />
+
+        {/* Teacher Attendance Management System Routes */}
         <Route
-          path="/superadmin/dashboard"
-          element={<Navigate to="/dashboard" replace />}
+          path="/attendance/teacher"
+          element={
+            <ProtectedRoute>
+              <TeacherAttendanceDashboard />
+            </ProtectedRoute>
+          }
         />
         <Route
-          path="/admin/dashboard"
-          element={<Navigate to="/dashboard" replace />}
+          path="/attendance/admin"
+          element={
+            <ProtectedRoute>
+              <AdminAttendanceDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/attendance/history"
+          element={
+            <ProtectedRoute>
+              <TeacherAttendanceHistory />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/attendance/reports"
+          element={
+            <ProtectedRoute>
+              <AttendanceReports />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/attendance/schedules"
+          element={
+            <ProtectedRoute>
+              <AttendanceScheduleManagement />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/attendance/location"
+          element={
+            <ProtectedRoute>
+              <GeofencingManagement />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/attendance/calendar"
+          element={
+            <ProtectedRoute>
+              <AttendanceCalendarManagement />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/attendance/corrections"
+          element={
+            <ProtectedRoute>
+              <AttendanceCorrectionsAdmin />
+            </ProtectedRoute>
+          }
         />
 
         {/* Faculty & Teachers */}
         <Route
           path="/teachers"
           element={
-            <ProtectedRoute allowedRoles={["superadmin", "admin", "teacher"]}>
+            <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
               <TeacherList />
             </ProtectedRoute>
           }
@@ -88,25 +150,19 @@ export default function App() {
         <Route
           path="/teachers/add"
           element={
-            <ProtectedRoute allowedRoles={["superadmin", "admin"]}>
+            <ProtectedRoute allowedRoles={['superadmin', 'admin']}>
               <AddTeacher />
             </ProtectedRoute>
           }
         />
-        <Route
-          path="/add-teacher"
-          element={<Navigate to="/teachers/add" replace />}
-        />
-        <Route
-          path="/teachers-list"
-          element={<Navigate to="/teachers" replace />}
-        />
+        <Route path="/add-teacher" element={<Navigate to="/teachers/add" replace />} />
+        <Route path="/teachers-list" element={<Navigate to="/teachers" replace />} />
 
         {/* Students Management */}
         <Route
           path="/students"
           element={
-            <ProtectedRoute allowedRoles={["superadmin", "admin", "teacher"]}>
+            <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
               <StudentList />
             </ProtectedRoute>
           }
@@ -114,7 +170,7 @@ export default function App() {
         <Route
           path="/students/add"
           element={
-            <ProtectedRoute allowedRoles={["superadmin", "admin", "teacher"]}>
+            <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
               <AddStudent />
             </ProtectedRoute>
           }
@@ -123,7 +179,7 @@ export default function App() {
         {/* ------------------------------------------------------------- */}
         {/* ONLINE EXAMINATION SYSTEM ROUTES                              */}
         {/* ------------------------------------------------------------- */}
-
+        
         {/* Examination Hub / List (All logged-in roles) */}
         <Route
           path="/exams"
@@ -148,7 +204,7 @@ export default function App() {
         <Route
           path="/exams/create"
           element={
-            <ProtectedRoute allowedRoles={["superadmin", "admin", "teacher"]}>
+            <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
               <CreateExamWizard />
             </ProtectedRoute>
           }
@@ -158,7 +214,7 @@ export default function App() {
         <Route
           path="/exams/:id/builder"
           element={
-            <ProtectedRoute allowedRoles={["superadmin", "admin", "teacher"]}>
+            <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
               <QuestionPaperBuilder />
             </ProtectedRoute>
           }
@@ -168,7 +224,7 @@ export default function App() {
         <Route
           path="/question-papers"
           element={
-            <ProtectedRoute allowedRoles={["superadmin", "admin", "teacher"]}>
+            <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
               <QuestionPaperList />
             </ProtectedRoute>
           }
@@ -178,7 +234,7 @@ export default function App() {
         <Route
           path="/exam-patterns"
           element={
-            <ProtectedRoute allowedRoles={["superadmin", "admin", "teacher"]}>
+            <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
               <ExamPatterns />
             </ProtectedRoute>
           }
@@ -188,9 +244,7 @@ export default function App() {
         <Route
           path="/exams/recordings"
           element={
-            <ProtectedRoute
-              allowedRoles={["superadmin", "principal", "admin", "teacher"]}
-            >
+            <ProtectedRoute allowedRoles={['superadmin', 'principal', 'admin', 'teacher']}>
               <VideoRecordingsManager />
             </ProtectedRoute>
           }
@@ -200,7 +254,7 @@ export default function App() {
         <Route
           path="/reports/my-report"
           element={
-            <ProtectedRoute allowedRoles={["student"]}>
+            <ProtectedRoute allowedRoles={['student']}>
               <StudentReport />
             </ProtectedRoute>
           }
@@ -210,7 +264,7 @@ export default function App() {
         <Route
           path="/question-bank"
           element={
-            <ProtectedRoute allowedRoles={["superadmin", "admin", "teacher"]}>
+            <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
               <QuestionBank />
             </ProtectedRoute>
           }
@@ -220,7 +274,7 @@ export default function App() {
         <Route
           path="/exams/approvals"
           element={
-            <ProtectedRoute allowedRoles={["superadmin", "admin"]}>
+            <ProtectedRoute allowedRoles={['superadmin', 'admin']}>
               <ExamApproval />
             </ProtectedRoute>
           }
@@ -230,7 +284,7 @@ export default function App() {
         <Route
           path="/exams/:id/monitor"
           element={
-            <ProtectedRoute allowedRoles={["superadmin", "admin", "teacher"]}>
+            <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
               <LiveExamMonitor />
             </ProtectedRoute>
           }
@@ -240,7 +294,7 @@ export default function App() {
         <Route
           path="/exams/:id/take"
           element={
-            <ProtectedRoute allowedRoles={["student"]}>
+            <ProtectedRoute allowedRoles={['student']}>
               <ExamErrorBoundary>
                 <StudentExamInterface />
               </ExamErrorBoundary>
@@ -252,7 +306,7 @@ export default function App() {
         <Route
           path="/exams/evaluations"
           element={
-            <ProtectedRoute allowedRoles={["superadmin", "admin", "teacher"]}>
+            <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
               <TeacherEvaluation />
             </ProtectedRoute>
           }
@@ -260,7 +314,7 @@ export default function App() {
         <Route
           path="/exams/:examId/evaluations"
           element={
-            <ProtectedRoute allowedRoles={["superadmin", "admin", "teacher"]}>
+            <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
               <TeacherEvaluation />
             </ProtectedRoute>
           }
@@ -278,7 +332,7 @@ export default function App() {
         <Route
           path="/exams/:examId/analytics"
           element={
-            <ProtectedRoute allowedRoles={["superadmin", "admin", "teacher"]}>
+            <ProtectedRoute allowedRoles={['superadmin', 'admin', 'teacher']}>
               <ExamResultsDashboard />
             </ProtectedRoute>
           }
@@ -297,7 +351,6 @@ export default function App() {
         {/* Fallbacks */}
         <Route path="/" element={<Navigate to="/dashboard" replace />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
-        <Route path="/ExamVideoRecordings" element={<ExamVideoRecorder />} />
       </Routes>
     </Router>
   );
