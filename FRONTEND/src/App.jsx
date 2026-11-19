@@ -26,6 +26,14 @@ import ExamPatterns from './pages/exams/ExamPatterns.jsx';
 import VideoRecordingsManager from './pages/exams/VideoRecordingsManager.jsx';
 import NotificationPage from './pages/notifications/NotificationPage.jsx';
 import LeaveManagement from './pages/leaves/LeaveManagement.jsx';
+import TeacherAttendanceDashboard from './pages/attendance/TeacherAttendanceDashboard.jsx';
+import AdminAttendanceDashboard from './pages/attendance/AdminAttendanceDashboard.jsx';
+import TeacherAttendanceHistory from './pages/attendance/TeacherAttendanceHistory.jsx';
+import AttendanceReports from './pages/attendance/AttendanceReports.jsx';
+import AttendanceScheduleManagement from './pages/attendance/AttendanceScheduleManagement.jsx';
+import GeofencingManagement from './pages/attendance/GeofencingManagement.jsx';
+import AttendanceCalendarManagement from './pages/attendance/AttendanceCalendarManagement.jsx';
+import AttendanceCorrectionsAdmin from './pages/attendance/AttendanceCorrectionsAdmin.jsx';
 
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 
@@ -63,6 +71,72 @@ export default function App() {
         />
         <Route path="/superadmin/dashboard" element={<Navigate to="/dashboard" replace />} />
         <Route path="/admin/dashboard" element={<Navigate to="/dashboard" replace />} />
+
+        {/* Teacher Attendance Management System Routes */}
+        <Route
+          path="/attendance/teacher"
+          element={
+            <ProtectedRoute>
+              <TeacherAttendanceDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/attendance/admin"
+          element={
+            <ProtectedRoute>
+              <AdminAttendanceDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/attendance/history"
+          element={
+            <ProtectedRoute>
+              <TeacherAttendanceHistory />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/attendance/reports"
+          element={
+            <ProtectedRoute>
+              <AttendanceReports />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/attendance/schedules"
+          element={
+            <ProtectedRoute>
+              <AttendanceScheduleManagement />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/attendance/location"
+          element={
+            <ProtectedRoute>
+              <GeofencingManagement />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/attendance/calendar"
+          element={
+            <ProtectedRoute>
+              <AttendanceCalendarManagement />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/attendance/corrections"
+          element={
+            <ProtectedRoute>
+              <AttendanceCorrectionsAdmin />
+            </ProtectedRoute>
+          }
+        />
 
         {/* Faculty & Teachers */}
         <Route
